@@ -39,7 +39,7 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 Команды выполняются **на роутере** (по SSH):
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ sh install-fibocom-l860gl.sh
 ### Удаление
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -97,4 +97,4 @@ OpenWrt 25.12.x (mediatek/filogic, `aarch64_cortex-a53`), модем Fibocom L86
 
 ### Лицензия
 
-[MIT](LICENSE) © 2026 lastik997
+[MIT](LICENSE) © 2026 lastik9

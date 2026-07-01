@@ -39,7 +39,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 Run **on the router** (over SSH):
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ Settings live in variables at the top of the script: interface name, firewall zo
 ### Uninstall
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -97,4 +97,4 @@ Installed components are the property of their authors and distributed under the
 
 ### License
 
-[MIT](LICENSE) © 2026 lastik997
+[MIT](LICENSE) © 2026 lastik9

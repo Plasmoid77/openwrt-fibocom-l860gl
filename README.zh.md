@@ -39,7 +39,7 @@ L860-GL 是基于 Intel XMM7560 的 M.2 模块。与高通模块（qmi/mbim）�
 在**路由器上**（通过 SSH）执行：
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ sh install-fibocom-l860gl.sh
 ### 卸载
 
 ```sh
-wget https://raw.githubusercontent.com/lastik997/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -97,4 +97,4 @@ OpenWrt 25.12.x（mediatek/filogic，`aarch64_cortex-a53`），Fibocom L860-GL-1
 
 ### 许可证
 
-[MIT](LICENSE) © 2026 lastik997
+[MIT](LICENSE) © 2026 lastik9
