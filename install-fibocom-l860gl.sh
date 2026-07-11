@@ -27,8 +27,12 @@ set -e
 AT_PORT_DEFAULT="/dev/ttyACM0"  # L860-GL AT port is cdc-acm (ttyACM*), NOT ttyUSB
 FEEDS="/etc/apk/repositories.d/customfeeds.list"
 KEYDIR="/etc/apk/keys"
-REPO_ADB="https://github.com/4IceG/Modem-extras-apk/raw/refs/heads/main/myapk/packages.adb"
-REPO_KEY="https://github.com/4IceG/Modem-extras-apk/raw/refs/heads/main/myapk/IceG-apkpub.pem"
+# Direct raw.githubusercontent.com URLs on purpose: the github.com/.../raw/...
+# form issues a 302 redirect, which HTTP proxies (e.g. Clash/ssclash on :7890)
+# mishandle -> "HTTP error 400" / "unexpected end of file" during apk update.
+# REPO_ADB is read by apk itself, so a bad URL breaks apk update, not just wget.
+REPO_ADB="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/packages.adb"
+REPO_KEY="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/IceG-apkpub.pem"
 LAN132_BASE="https://openwrt.132lan.ru/packages"
 
 # --- Network interface settings --------------------------------------------
@@ -43,6 +47,10 @@ PIN_CODE=""                     # SIM PIN, leave empty if the SIM has none
 SMS_PREFIX="7"                  # country dialing prefix for sms-tool (48=PL, 7=RU)
 
 say() { echo ""; echo ">>> $1"; }
+
+# Best-effort apk add: never abort the whole run (set -e) if one package is
+# missing (e.g. the 4IceG feed is unreachable behind a proxy).
+add_opt() { apk add "$1" || echo "   (skipped $1)"; }
 
 # --- Ask for the APN up front so the rest can run unattended ---------------
 APN="$APN_DEFAULT"
@@ -76,37 +84,69 @@ cd /tmp && wget "${LAN132_BASE}/${REL}/packages/add.sh" -O - | sh
 apk add luci-proto-xmm
 apk add sms-tool
 
-# --- 2. Add 4IceG apk repository (idempotent) ------------------------------
+# --- 2. Add 4IceG apk repository (key first, then feed, roll back on failure)
+# Order matters: fetch a VALID key BEFORE adding the feed line. Otherwise a
+# failed key download (set -e) leaves the feed line in place, and every later
+# apk update on the router breaks with a non-obvious error.
 say "Step 2: adding 4IceG apk repository"
-if ! grep -qF "$REPO_ADB" "$FEEDS" 2>/dev/null; then
-    echo "$REPO_ADB" >> "$FEEDS"
-    echo "   repo line added"
+mkdir -p "$KEYDIR"
+ICEG_KEY="$KEYDIR/IceG-apkpub.pem"
+
+# A leftover file doesn't prove the key is correct (a stale/foreign key gives
+# "UNTRUSTED signature"; behind a proxy an HTML error page may land here too).
+# So we check the PEM header, not just existence.
+key_ok() { [ -s "$1" ] && head -n1 "$1" | grep -q 'BEGIN PUBLIC KEY'; }
+
+if key_ok "$ICEG_KEY"; then
+    echo "   signing key present"
 else
-    echo "   repo line already present, skipping"
+    rm -f "$ICEG_KEY"
+    if wget -q "$REPO_KEY" -O "$ICEG_KEY" && key_ok "$ICEG_KEY"; then
+        echo "   signing key installed"
+    else
+        rm -f "$ICEG_KEY"
+        echo "   WARNING: could not fetch a valid 4IceG key — panels will be skipped"
+        echo "   (behind a proxy? try: /etc/init.d/clash stop, then re-run)"
+    fi
 fi
 
-mkdir -p "$KEYDIR"
-if [ ! -s "$KEYDIR/IceG-apkpub.pem" ]; then
-    wget "$REPO_KEY" -O "$KEYDIR/IceG-apkpub.pem"
-    echo "   signing key installed"
+ICEG_OK=0
+if [ -s "$ICEG_KEY" ]; then
+    grep -qF "$REPO_ADB" "$FEEDS" 2>/dev/null || echo "$REPO_ADB" >> "$FEEDS"
+    if apk update; then
+        ICEG_OK=1
+    else
+        echo "   WARNING: apk update failed with the 4IceG feed — removing it again"
+        sed -i '\#4IceG/Modem-extras-apk#d' "$FEEDS" 2>/dev/null
+        apk update || true
+    fi
 else
-    echo "   signing key already present, skipping"
+    # No key -> never leave the feed line behind (it would break apk update).
+    sed -i '\#4IceG/Modem-extras-apk#d' "$FEEDS" 2>/dev/null
+    apk update || true
 fi
-apk update
 
 # --- 3. Install the plugins ------------------------------------------------
+# Best-effort throughout: if the 4IceG feed is unavailable the modem still
+# comes up (the XMM interface below is built from the 132lan feed, which has
+# no redirect and works behind a proxy).
 say "Step 3: installing 3ginfo-lite, sms-tool-js and modemband"
-apk add luci-app-3ginfo-lite
-apk add luci-app-sms-tool-js
-# modemband: GUI band-locking for L860-GL (drives AT+XACT under the hood).
-apk add luci-app-modemband
+if [ "$ICEG_OK" = "1" ]; then
+    add_opt luci-app-3ginfo-lite
+    add_opt luci-app-sms-tool-js
+    # modemband: GUI band-locking for L860-GL (drives AT+XACT under the hood).
+    add_opt luci-app-modemband
 
-if [ "$INSTALL_RU" = "yes" ]; then
-    say "Step 3: installing Russian translations"
-    # Installed best-effort: a missing -ru package can't abort the run.
-    apk add luci-i18n-3ginfo-lite-ru  || echo "   (3ginfo RU not in feed, skipping)"
-    apk add luci-i18n-sms-tool-js-ru  || echo "   (sms-tool-js RU not in feed, skipping)"
-    apk add luci-i18n-modemband-ru    || echo "   (modemband RU not in feed, skipping)"
+    if [ "$INSTALL_RU" = "yes" ]; then
+        say "Step 3: installing Russian translations"
+        add_opt luci-i18n-3ginfo-lite-ru
+        add_opt luci-i18n-sms-tool-js-ru
+        add_opt luci-i18n-modemband-ru
+    fi
+else
+    echo "   WARNING: 4IceG feed unavailable — skipping panels (3ginfo/sms-tool/modemband)."
+    echo "   The modem itself will still come up. Re-run after fixing feed access"
+    echo "   (behind a proxy? /etc/init.d/clash stop, then re-run this script)."
 fi
 
 # --- 4. Detect + set the AT port -------------------------------------------
@@ -136,9 +176,13 @@ if [ "$AT_PORT" = "$AT_PORT_DEFAULT" ] && ! [ -c "$AT_PORT" ]; then
     echo "       ls -l /dev/ttyACM* ; sms_tool -d /dev/ttyACM0 at ATI"
     echo "   and if needed:  uci set 3ginfo.@3ginfo[0].device=/dev/ttyACMx; uci commit 3ginfo"
 fi
-uci set 3ginfo.@3ginfo[0].device="$AT_PORT"
-[ "$CREATE_INTERFACE" = "yes" ] && uci set 3ginfo.@3ginfo[0].network="$IFACE_NAME"
-uci commit 3ginfo
+# Guarded: if the 4IceG feed was unreachable, 3ginfo isn't installed and its
+# config doesn't exist -- skip rather than abort (the modem still comes up).
+if [ -f /etc/config/3ginfo ]; then
+    uci set 3ginfo.@3ginfo[0].device="$AT_PORT"
+    [ "$CREATE_INTERFACE" = "yes" ] && uci set 3ginfo.@3ginfo[0].network="$IFACE_NAME"
+    uci commit 3ginfo
+fi
 
 # --- 5. Create the XMM network interface -----------------------------------
 # Builds a ready-to-use interface: proto=xmm, the auto-detected modem port,

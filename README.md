@@ -39,7 +39,7 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 Команды выполняются **на роутере** (по SSH):
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ sh install-fibocom-l860gl.sh
 ### Удаление
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -58,6 +58,17 @@ sh uninstall-fibocom-l860gl.sh
 
 ### Известные болячки
 
+- **Панели 4IceG не установились, `apk update` ругается `error 8` / `unexpected end of file` / `UNTRUSTED signature`** — почти всегда виноват **HTTP-прокси на роутере** (Clash / ssclash на `127.0.0.1:7890`): он ломает редирект GitHub или подсовывает неверный ключ. Останови прокси на время установки и запусти скрипт заново:
+  ```sh
+  /etc/init.d/clash stop
+  sh install-fibocom-l860gl.sh
+  /etc/init.d/clash start
+  ```
+  Начиная с этой версии скрипт сам откатывает строку фида при сбое, так что `apk update` не должен ломаться. Если всё же залипло (после старой версии):
+  ```sh
+  sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
+  ```
+- **`wget` сохранил файл как `index.html`** — за прокси busybox-`wget` теряет имя из URL. Всегда качай с явным именем: `wget -O install-fibocom-l860gl.sh <URL>`.
 - **`Failed add repository modem_kmod!`** при работе `add.sh` 132lan — безвредно. Нужные драйверы (`xmm-modem`, `kmod-*`) ставятся из официальных фидов OpenWrt, на установку это не влияет.
 - **`Carrier: Absent` после установки** — почти всегда неверный **APN**. Он зависит от оператора: скрипт по умолчанию ставит `internet`, но у части тарифов он другой. Исправь APN в интерфейсе и `Save & Apply`.
 - **3ginfo не показывает данные** — проверь AT-порт (`ls -l /dev/ttyACM*`, затем `sms_tool -d /dev/ttyACM0 at ATI`). Если рабочий порт другой — поправь `device` в 3ginfo.

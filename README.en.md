@@ -39,7 +39,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 Run **on the router** (over SSH):
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ Settings live in variables at the top of the script: interface name, firewall zo
 ### Uninstall
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -58,6 +58,17 @@ The uninstaller removes the interface and its firewall membership, deletes the p
 
 ### Known issues
 
+- **4IceG panels didn't install, `apk update` complains `error 8` / `unexpected end of file` / `UNTRUSTED signature`** — almost always an **HTTP proxy on the router** (Clash / ssclash on `127.0.0.1:7890`): it breaks the GitHub redirect or injects a wrong key. Stop the proxy for the install and re-run:
+  ```sh
+  /etc/init.d/clash stop
+  sh install-fibocom-l860gl.sh
+  /etc/init.d/clash start
+  ```
+  Since this version the script rolls back the feed line on failure, so `apk update` shouldn't break. If a line got stuck anyway (from an older version):
+  ```sh
+  sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
+  ```
+- **`wget` saved the file as `index.html`** — behind a proxy busybox `wget` loses the name from the URL. Always download with an explicit name: `wget -O install-fibocom-l860gl.sh <URL>`.
 - **`Failed add repository modem_kmod!`** during the 132lan `add.sh` — harmless. The needed drivers (`xmm-modem`, `kmod-*`) come from the official OpenWrt feeds; install is unaffected.
 - **`Carrier: Absent` after install** — almost always a wrong **APN**. It's carrier-specific: the script defaults to `internet`, but some plans differ. Fix the APN on the interface and `Save & Apply`.
 - **3ginfo shows no data** — verify the AT port (`ls -l /dev/ttyACM*`, then `sms_tool -d /dev/ttyACM0 at ATI`). If the working port differs, update `device` in 3ginfo.

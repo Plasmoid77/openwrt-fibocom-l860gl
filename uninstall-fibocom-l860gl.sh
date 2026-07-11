@@ -43,12 +43,21 @@ if [ -n "$ZONE_SECT" ]; then
 fi
 
 # --- 2. Remove packages (two passes handle dependency ordering) ------------
+# Pass 1 does the real work; pass 2 mops up leftovers whose deps blocked them
+# the first time. We filter apk's per-package "OK: <size> in <n> packages"
+# summary: for a package that is already gone apk prints *only* that line, so a
+# long PKGS/DEPS list would produce a wall of identical "OK:" lines that looks
+# like the script hung (and tempts people to hit Ctrl+C). Real "Purging ..."
+# lines are kept, so you still see what is actually being removed.
 say "Removing packages"
-for pass in 1 2; do
-    for pkg in $PKGS $DEPS; do
-        apk del "$pkg" 2>/dev/null || true
-    done
+for pkg in $PKGS $DEPS; do
+    apk del "$pkg" 2>/dev/null | grep -vE '^OK:' || true
 done
+echo "   second pass (mopping up leftovers, quiet)..."
+for pkg in $PKGS $DEPS; do
+    apk del "$pkg" >/dev/null 2>&1 || true
+done
+echo "   packages removed"
 
 # --- 3. Remove panel config files ------------------------------------------
 say "Removing leftover configs"

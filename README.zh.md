@@ -39,7 +39,7 @@ L860-GL 是基于 Intel XMM7560 的 M.2 模块。与高通模块（qmi/mbim）�
 在**路由器上**（通过 SSH）执行：
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -50,7 +50,7 @@ sh install-fibocom-l860gl.sh
 ### 卸载
 
 ```sh
-wget https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -58,6 +58,17 @@ sh uninstall-fibocom-l860gl.sh
 
 ### 已知问题
 
+- **4IceG 面板未安装，`apk update` 报错 `error 8` / `unexpected end of file` / `UNTRUSTED signature`** —— 几乎都是路由器上的 **HTTP 代理**（Clash / ssclash，`127.0.0.1:7890`）：它破坏了 GitHub 重定向或注入了错误的密钥。安装时先停止代理并重新运行：
+  ```sh
+  /etc/init.d/clash stop
+  sh install-fibocom-l860gl.sh
+  /etc/init.d/clash start
+  ```
+  从此版本起，脚本在失败时会自动回滚软件源行，因此 `apk update` 不应再损坏。若仍有残留（来自旧版本）：
+  ```sh
+  sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
+  ```
+- **`wget` 把文件保存成了 `index.html`** —— 在代理后 busybox 的 `wget` 会丢失 URL 中的文件名。始终用显式文件名下载：`wget -O install-fibocom-l860gl.sh <URL>`。
 - 132lan 的 `add.sh` 运行时出现 **`Failed add repository modem_kmod!`** —— 无害。所需驱动（`xmm-modem`、`kmod-*`）来自官方 OpenWrt 软件源，不影响安装。
 - 安装后 **`Carrier: Absent`** —— 几乎都是 **APN** 不对。APN 因运营商而异：脚本默认 `internet`，但部分套餐不同。在接口上修正 APN 并 `Save & Apply`。
 - **3ginfo 无数据** —— 检查 AT 端口（`ls -l /dev/ttyACM*`，然后 `sms_tool -d /dev/ttyACM0 at ATI`）。若可用端口不同，请更新 3ginfo 的 `device`。
