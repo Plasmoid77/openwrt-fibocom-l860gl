@@ -72,10 +72,13 @@ dl() {
 }
 
 feed_reachable() {
+    # Probe the actual add.sh for this release (a real file), not the directory
+    # index -- so it still works if the server ever disables directory listing.
+    _u="${ADD_SH_URL:-${LAN132_BASE}/}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsS -m 8 -o /dev/null "${LAN132_BASE}/" 2>/dev/null
+        curl -fsS -m 8 -o /dev/null "$_u" 2>/dev/null
     else
-        wget -q -O /dev/null -T 8 "${LAN132_BASE}/" 2>/dev/null
+        wget -q -O /dev/null -T 8 "$_u" 2>/dev/null
     fi
 }
 
@@ -105,7 +108,7 @@ ensure_feed_reachable() {
     fi
 
     echo ""
-    echo "ERROR: cannot reach ${LAN132_BASE} (required for luci-proto-xmm / xmm-modem)."
+    echo "ERROR: cannot reach ${ADD_SH_URL:-$LAN132_BASE} (required for luci-proto-xmm / xmm-modem)."
     if clash_running; then
         echo "  A proxy is running but this domain is still blocked. Allow it in your"
         echo "  Mihomo config and reload, e.g.:"
@@ -144,15 +147,18 @@ echo "   Russian translations: $INSTALL_RU"
 # pulls xmm-modem, kmod-usb-net-cdc-ncm, kmod-usb-acm, kmod-usb-serial-option,
 # i.e. everything the L860-GL needs (cdc-acm gives us the /dev/ttyACM* AT port).
 say "Step 1: installing modem drivers (XMM proto via 132lan feed)"
+# Work out the exact feed URL first so the reachability probe hits a real file
+# (add.sh for this release) rather than a directory index.
+. /etc/openwrt_release
+REL="${DISTRIB_RELEASE%.*}"          # e.g. 25.12.4 -> 25.12
+ADD_SH_URL="${LAN132_BASE}/${REL}/packages/add.sh"
 # Reachability + proxy routing BEFORE the first apk update: in whitelist mode
 # even the official feeds are reachable only through the proxy, so the env has
 # to be set first. From here on every apk update also refreshes the 132lan repo.
 ensure_feed_reachable
 apk update
-. /etc/openwrt_release
-REL="${DISTRIB_RELEASE%.*}"          # e.g. 25.12.4 -> 25.12
 cd /tmp
-dl "${LAN132_BASE}/${REL}/packages/add.sh" /tmp/add.sh
+dl "$ADD_SH_URL" /tmp/add.sh
 sh /tmp/add.sh
 apk add luci-proto-xmm
 apk add sms-tool
