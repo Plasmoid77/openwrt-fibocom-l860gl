@@ -2,9 +2,7 @@
 
 Установщик модема **Fibocom L860-GL** (Intel XMM7560) на **OpenWrt 25 (apk)**: разворачивает XMM-драйверы, создаёт сетевой интерфейс и ставит панели [4IceG](https://github.com/4IceG) — `3ginfo-lite`, `sms-tool-js`, `modemband` — за один прогон на чистой системе.
 
-![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue)
-![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue) ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 **Русский** · [English](README.en.md) · [中文](README.zh.md)
 
@@ -38,7 +36,7 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 
 Команды выполняются **на роутере** (по SSH):
 
-```sh
+```
 wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
@@ -49,7 +47,7 @@ sh install-fibocom-l860gl.sh
 
 ### Удаление
 
-```sh
+```
 wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
@@ -58,16 +56,25 @@ sh uninstall-fibocom-l860gl.sh
 
 ### Известные болячки
 
-- **Панели 4IceG не установились, `apk update` ругается `error 8` / `unexpected end of file` / `UNTRUSTED signature`** — почти всегда виноват **HTTP-прокси на роутере** (Clash / ssclash на `127.0.0.1:7890`): он ломает редирект GitHub или подсовывает неверный ключ. Останови прокси на время установки и запусти скрипт заново:
-  ```sh
-  /etc/init.d/clash stop
-  sh install-fibocom-l860gl.sh
-  /etc/init.d/clash start
+- **`add.sh` / `apk update` падает с `Failed to send request: Operation not permitted`, либо панели 4IceG не встали (`error 8` / `unexpected end of file` / `UNTRUSTED signature`)** — виноват **прозрачный прокси** на роутере (Clash / [ssclash](https://github.com/lastik9/openwrt-ssclash) / Mihomo). Фид `openwrt.132lan.ru` он часто заворачивает в REJECT (отсюда `Operation not permitted`), а редирект GitHub рвёт. **Прокси при этом останавливать НЕ нужно** — в режиме «белых списков» это оставит роутер без интернета. Начиная с этой версии скрипт сам находит запущенный Clash/Mihomo и пускает свои загрузки через его локальный прокси `http://127.0.0.1:7890` (env `http_proxy`/`https_proxy`, как в openwrt-ssclash), а ссылки на ключ и фид 4IceG теперь прямые (`raw.githubusercontent.com`, без 302-редиректа). Обычно делать ничего не нужно. Если порт прокси другой — задай его при запуске:
+
   ```
-  Начиная с этой версии скрипт сам откатывает строку фида при сбое, так что `apk update` не должен ломаться. Если всё же залипло (после старой версии):
-  ```sh
+  CLASH_PROXY=http://127.0.0.1:7890 sh install-fibocom-l860gl.sh
+  ```
+
+  Если фид всё равно недоступен — разреши домен в конфиге Mihomo и перезагрузи ядро:
+
+  ```
+  rules:
+    - DOMAIN-SUFFIX,132lan.ru,DIRECT   # или PROXY в режиме «белых списков»
+  ```
+
+  Хвост старого фида (после установки древней версией) чистится так:
+
+  ```
   sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
   ```
+
 - **`wget` сохранил файл как `index.html`** — за прокси busybox-`wget` теряет имя из URL. Всегда качай с явным именем: `wget -O install-fibocom-l860gl.sh <URL>`.
 - **`Failed add repository modem_kmod!`** при работе `add.sh` 132lan — безвредно. Нужные драйверы (`xmm-modem`, `kmod-*`) ставятся из официальных фидов OpenWrt, на установку это не влияет.
 - **`Carrier: Absent` после установки** — почти всегда неверный **APN**. Он зависит от оператора: скрипт по умолчанию ставит `internet`, но у части тарифов он другой. Исправь APN в интерфейсе и `Save & Apply`.
@@ -77,7 +84,7 @@ sh uninstall-fibocom-l860gl.sh
 
 ### Диагностика
 
-```sh
+```
 ls -l /dev/ttyACM*                                   # порты модема
 sms_tool -d /dev/ttyACM0 at 'ATI'                    # ответ модема
 sms_tool -d /dev/ttyACM0 at 'AT+CSQ'                 # сигнал (xx,yy)
@@ -102,7 +109,7 @@ OpenWrt 25.12.x (mediatek/filogic, `aarch64_cortex-a53`), модем Fibocom L86
 - [luci-app-modemband](https://github.com/4IceG/luci-app-modemband) — управление LTE-диапазонами
 - [Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) — apk-репозиторий пакетов
 
-Также спасибо [132lan](https://openwrt.132lan.ru) за модемный фид с XMM-драйверами.
+Также спасибо [132lan](https://openwrt.132lan.ru) за модемный фид с XMM-драйверами. Приём «обновление за белыми списками» (проксирование трафика роутера через Mihomo) — из проекта [openwrt-ssclash](https://github.com/lastik9/openwrt-ssclash).
 
 Устанавливаемые компоненты — собственность их авторов и распространяются под их лицензиями. Лицензия MIT покрывает только код этого установщика.
 

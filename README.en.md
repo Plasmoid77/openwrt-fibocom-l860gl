@@ -2,9 +2,7 @@
 
 One-shot installer for the **Fibocom L860-GL** (Intel XMM7560) modem on **OpenWrt 25 (apk)**: XMM drivers, a ready-to-use network interface, and the [4IceG](https://github.com/4IceG) panels — `3ginfo-lite`, `sms-tool-js`, `modemband` — in a single run on a clean system.
 
-![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue)
-![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue) ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [Русский](README.md) · **English** · [中文](README.zh.md)
 
@@ -38,7 +36,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 
 Run **on the router** (over SSH):
 
-```sh
+```
 wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
@@ -49,7 +47,7 @@ Settings live in variables at the top of the script: interface name, firewall zo
 
 ### Uninstall
 
-```sh
+```
 wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
@@ -58,16 +56,25 @@ The uninstaller removes the interface and its firewall membership, deletes the p
 
 ### Known issues
 
-- **4IceG panels didn't install, `apk update` complains `error 8` / `unexpected end of file` / `UNTRUSTED signature`** — almost always an **HTTP proxy on the router** (Clash / ssclash on `127.0.0.1:7890`): it breaks the GitHub redirect or injects a wrong key. Stop the proxy for the install and re-run:
-  ```sh
-  /etc/init.d/clash stop
-  sh install-fibocom-l860gl.sh
-  /etc/init.d/clash start
+- **`add.sh` / `apk update` fails with `Failed to send request: Operation not permitted`, or the 4IceG panels didn't install (`error 8` / `unexpected end of file` / `UNTRUSTED signature`)** — a **transparent proxy** on the router (Clash / [ssclash](https://github.com/lastik9/openwrt-ssclash) / Mihomo) is to blame. It often routes the `openwrt.132lan.ru` feed into a REJECT rule (hence `Operation not permitted`) and breaks the GitHub redirect. **Do NOT stop the proxy** — in whitelist mode that leaves the router with no internet. Since this version the script detects a running Clash/Mihomo and routes its own downloads through its local proxy `http://127.0.0.1:7890` (env `http_proxy`/`https_proxy`, like openwrt-ssclash), and the 4IceG key/feed URLs are now direct (`raw.githubusercontent.com`, no 302 redirect). Usually nothing to do. If the proxy port differs, pass it at launch:
+
   ```
-  Since this version the script rolls back the feed line on failure, so `apk update` shouldn't break. If a line got stuck anyway (from an older version):
-  ```sh
+  CLASH_PROXY=http://127.0.0.1:7890 sh install-fibocom-l860gl.sh
+  ```
+
+  If the feed is still unreachable, allow the domain in your Mihomo config and reload the core:
+
+  ```
+  rules:
+    - DOMAIN-SUFFIX,132lan.ru,DIRECT   # or PROXY in whitelist mode
+  ```
+
+  A leftover feed line (from an ancient version) is cleaned like this:
+
+  ```
   sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
   ```
+
 - **`wget` saved the file as `index.html`** — behind a proxy busybox `wget` loses the name from the URL. Always download with an explicit name: `wget -O install-fibocom-l860gl.sh <URL>`.
 - **`Failed add repository modem_kmod!`** during the 132lan `add.sh` — harmless. The needed drivers (`xmm-modem`, `kmod-*`) come from the official OpenWrt feeds; install is unaffected.
 - **`Carrier: Absent` after install** — almost always a wrong **APN**. It's carrier-specific: the script defaults to `internet`, but some plans differ. Fix the APN on the interface and `Save & Apply`.
@@ -77,7 +84,7 @@ The uninstaller removes the interface and its firewall membership, deletes the p
 
 ### Diagnostics
 
-```sh
+```
 ls -l /dev/ttyACM*                                   # modem ports
 sms_tool -d /dev/ttyACM0 at 'ATI'                    # modem reply
 sms_tool -d /dev/ttyACM0 at 'AT+CSQ'                 # signal (xx,yy)
@@ -102,7 +109,7 @@ This project is only an installer. The heavy lifting is done by **[4IceG](https:
 - [luci-app-modemband](https://github.com/4IceG/luci-app-modemband) — LTE band control
 - [Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) — apk package repository
 
-Thanks also to [132lan](https://openwrt.132lan.ru) for the modem feed with the XMM drivers.
+Thanks also to [132lan](https://openwrt.132lan.ru) for the modem feed with the XMM drivers. The "update behind whitelists" trick (routing router traffic through Mihomo) comes from [openwrt-ssclash](https://github.com/lastik9/openwrt-ssclash).
 
 Installed components are the property of their authors and distributed under their own licenses. The MIT license covers only this installer's code.
 

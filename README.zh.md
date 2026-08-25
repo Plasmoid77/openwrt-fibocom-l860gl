@@ -2,9 +2,7 @@
 
 在 **OpenWrt 25 (apk)** 上一键部署 **Fibocom L860-GL**（Intel XMM7560）调制解调器：安装 XMM 驱动、创建即用型网络接口，并安装 [4IceG](https://github.com/4IceG) 面板 —— `3ginfo-lite`、`sms-tool-js`、`modemband`。
 
-![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue)
-![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue) ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [Русский](README.md) · [English](README.en.md) · **中文**
 
@@ -14,7 +12,7 @@
 
 ### 为什么
 
-L860-GL 是基于 Intel XMM7560 的 M.2 模块。与高通模块（qmi/mbim）不同，它使用 **XMM** 协议，AT 端口为 `cdc-acm`（`/dev/ttyACM*`），而非 `option`/`ttyUSB*`。要在 OpenWrt 上使其工作并读取遥测数据，需要一组特定的软件包以及正确的端口/接口绑定。脚本会自动完成这些操作，并将 4IceG 面板配置到检测到的端口，绕开常见坑（见"已知问题"）。
+L860-GL 是基于 Intel XMM7560 的 M.2 模块。与高通模块（qmi/mbim）不同，它使用 **XMM** 协议，AT 端口为 `cdc-acm`（`/dev/ttyACM*`），而非 `option`/`ttyUSB*`。要在 OpenWrt 上使其工作并读取遥测数据，需要一组特定的软件包以及正确的端口/接口绑定。脚本会自动完成这些操作，并将 4IceG 面板配置到检测到的端口，绕开常见坑（见“已知问题”）。
 
 ### 脚本做了什么
 
@@ -38,7 +36,7 @@ L860-GL 是基于 Intel XMM7560 的 M.2 模块。与高通模块（qmi/mbim）�
 
 在**路由器上**（通过 SSH）执行：
 
-```sh
+```
 wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
@@ -49,7 +47,7 @@ sh install-fibocom-l860gl.sh
 
 ### 卸载
 
-```sh
+```
 wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
@@ -58,16 +56,25 @@ sh uninstall-fibocom-l860gl.sh
 
 ### 已知问题
 
-- **4IceG 面板未安装，`apk update` 报错 `error 8` / `unexpected end of file` / `UNTRUSTED signature`** —— 几乎都是路由器上的 **HTTP 代理**（Clash / ssclash，`127.0.0.1:7890`）：它破坏了 GitHub 重定向或注入了错误的密钥。安装时先停止代理并重新运行：
-  ```sh
-  /etc/init.d/clash stop
-  sh install-fibocom-l860gl.sh
-  /etc/init.d/clash start
+- **`add.sh` / `apk update` 报 `Failed to send request: Operation not permitted`，或 4IceG 面板未安装（`error 8` / `unexpected end of file` / `UNTRUSTED signature`）** —— 罪魁是路由器上的**透明代理**（Clash / [ssclash](https://github.com/lastik9/openwrt-ssclash) / Mihomo）。它常把 `openwrt.132lan.ru` 源导入 REJECT 规则（因而出现 `Operation not permitted`），并破坏 GitHub 重定向。**不要停止代理** —— 在“白名单”模式下这会让路由器彻底断网。从此版本起，脚本会检测正在运行的 Clash/Mihomo，并把自身的下载经其本地代理 `http://127.0.0.1:7890`（环境变量 `http_proxy`/`https_proxy`，与 openwrt-ssclash 一致）转发；4IceG 的密钥/源链接现已改为直连（`raw.githubusercontent.com`，无 302 重定向）。通常无需任何操作。若代理端口不同，可在启动时指定：
+
   ```
-  从此版本起，脚本在失败时会自动回滚软件源行，因此 `apk update` 不应再损坏。若仍有残留（来自旧版本）：
-  ```sh
+  CLASH_PROXY=http://127.0.0.1:7890 sh install-fibocom-l860gl.sh
+  ```
+
+  若源仍不可达，请在 Mihomo 配置中放行该域名并重载内核：
+
+  ```
+  rules:
+    - DOMAIN-SUFFIX,132lan.ru,DIRECT   # 白名单模式下改为 PROXY
+  ```
+
+  旧版本残留的源行可这样清理：
+
+  ```
   sed -i '\#4IceG/Modem-extras-apk#d' /etc/apk/repositories.d/customfeeds.list && apk update
   ```
+
 - **`wget` 把文件保存成了 `index.html`** —— 在代理后 busybox 的 `wget` 会丢失 URL 中的文件名。始终用显式文件名下载：`wget -O install-fibocom-l860gl.sh <URL>`。
 - 132lan 的 `add.sh` 运行时出现 **`Failed add repository modem_kmod!`** —— 无害。所需驱动（`xmm-modem`、`kmod-*`）来自官方 OpenWrt 软件源，不影响安装。
 - 安装后 **`Carrier: Absent`** —— 几乎都是 **APN** 不对。APN 因运营商而异：脚本默认 `internet`，但部分套餐不同。在接口上修正 APN 并 `Save & Apply`。
@@ -77,7 +84,7 @@ sh uninstall-fibocom-l860gl.sh
 
 ### 诊断
 
-```sh
+```
 ls -l /dev/ttyACM*                                   # 模块端口
 sms_tool -d /dev/ttyACM0 at 'ATI'                    # 模块应答
 sms_tool -d /dev/ttyACM0 at 'AT+CSQ'                 # 信号 (xx,yy)
@@ -102,7 +109,7 @@ OpenWrt 25.12.x（mediatek/filogic，`aarch64_cortex-a53`），Fibocom L860-GL-1
 - [luci-app-modemband](https://github.com/4IceG/luci-app-modemband) —— LTE 频段控制
 - [Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) —— apk 软件源
 
-同时感谢 [132lan](https://openwrt.132lan.ru) 提供含 XMM 驱动的调制解调器软件源。
+同时感谢 [132lan](https://openwrt.132lan.ru) 提供含 XMM 驱动的调制解调器软件源。“白名单更新”技巧（将路由器流量经 Mihomo 转发）来自 [openwrt-ssclash](https://github.com/lastik9/openwrt-ssclash)。
 
 所安装的组件归其作者所有，并按其各自的许可证分发。MIT 许可证仅覆盖本安装器的代码。
 

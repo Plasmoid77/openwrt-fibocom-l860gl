@@ -16,9 +16,20 @@
 #   - L860-GL = Intel XMM -> xmm proto, AT port /dev/ttyACM* (auto-detected),
 #                            no CRLF fix needed (3ginfo data parses cleanly here)
 #
+# Transparent-proxy note (Clash / Mihomo / SSClash ...):
+#   The .ru modem feed (openwrt.132lan.ru) is often unreachable directly under a
+#   transparent proxy -> wget dies with "Failed to send request: Operation not
+#   permitted". We NEVER stop the proxy to work around this: in whitelist/bypass
+#   mode the proxy is the router's only route to the internet, so stopping it
+#   would cut the connection mid-install. Instead we route our OWN downloads
+#   through the local Mihomo HTTP proxy (default http://127.0.0.1:7890), exactly
+#   like openwrt-ssclash's "update behind whitelists". uclient-fetch and apk both
+#   honour http_proxy/https_proxy. Override the proxy with CLASH_PROXY=http://IP:PORT.
+#
 # Usage:
 #   scp this file to the router (e.g. /tmp), then:
 #   sh /tmp/install-fibocom-l860gl.sh
+#   (optional)  CLASH_PROXY=http://127.0.0.1:7890 sh /tmp/install-fibocom-l860gl.sh
 #
 # Re-running is safe: every step is idempotent.
 
@@ -27,13 +38,12 @@ set -e
 AT_PORT_DEFAULT="/dev/ttyACM0"  # L860-GL AT port is cdc-acm (ttyACM*), NOT ttyUSB
 FEEDS="/etc/apk/repositories.d/customfeeds.list"
 KEYDIR="/etc/apk/keys"
-# Direct raw.githubusercontent.com URLs on purpose: the github.com/.../raw/...
-# form issues a 302 redirect, which HTTP proxies (e.g. Clash/ssclash on :7890)
-# mishandle -> "HTTP error 400" / "unexpected end of file" during apk update.
-# REPO_ADB is read by apk itself, so a bad URL breaks apk update, not just wget.
+# Direct raw.githubusercontent.com URLs (NOT github.com/.../raw/..., which 302-
+# redirects -- uclient-fetch cannot follow redirects once a proxy is in play).
 REPO_ADB="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/packages.adb"
 REPO_KEY="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/IceG-apkpub.pem"
 LAN132_BASE="https://openwrt.132lan.ru/packages"
+CLASH_PROXY_DEFAULT="http://127.0.0.1:7890"   # ssclash/Mihomo mixed-port default
 
 # --- Network interface settings --------------------------------------------
 CREATE_INTERFACE="yes"          # yes | no  -- create the XMM interface
@@ -48,9 +58,66 @@ SMS_PREFIX="7"                  # country dialing prefix for sms-tool (48=PL, 7=
 
 say() { echo ""; echo ">>> $1"; }
 
-# Best-effort apk add: never abort the whole run (set -e) if one package is
-# missing (e.g. the 4IceG feed is unreachable behind a proxy).
-add_opt() { apk add "$1" || echo "   (skipped $1)"; }
+# --- Download + proxy helpers ----------------------------------------------
+# dl <url> <outfile|-> : prefer curl (reliable HTTPS CONNECT through a proxy;
+# always present on ssclash routers), else fall back to uclient-fetch. Both
+# honour the http_proxy/https_proxy we may export below.
+dl() {
+    _url="$1"; _out="$2"
+    if command -v curl >/dev/null 2>&1; then
+        if [ "$_out" = "-" ]; then curl -fsSL "$_url"; else curl -fsSL -o "$_out" "$_url"; fi
+    else
+        wget "$_url" -O "$_out"
+    fi
+}
+
+feed_reachable() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS -m 8 -o /dev/null "${LAN132_BASE}/" 2>/dev/null
+    else
+        wget -q -O /dev/null -T 8 "${LAN132_BASE}/" 2>/dev/null
+    fi
+}
+
+clash_running() {
+    pidof clash >/dev/null 2>&1 || pidof mihomo >/dev/null 2>&1
+}
+
+# Make sure openwrt.132lan.ru is reachable, WITHOUT ever stopping the proxy.
+# 1) reachable as-is (direct, or an already-exported proxy env)  -> done
+# 2) proxy running -> route our downloads through it, re-test    -> done
+# 3) still blocked -> actionable hint, exit (proxy left untouched)
+ensure_feed_reachable() {
+    if feed_reachable; then return 0; fi
+
+    if clash_running; then
+        _p="${CLASH_PROXY:-$CLASH_PROXY_DEFAULT}"
+        echo "   132lan feed not reachable directly -> routing downloads via $_p (proxy stays up)"
+        export http_proxy="$_p" https_proxy="$_p"
+        _lan="$(uci -q get network.lan.ipaddr 2>/dev/null)"
+        export no_proxy="127.0.0.1,localhost,::1${_lan:+,$_lan}"
+        unset _lan
+        if feed_reachable; then
+            echo "   OK: feed reachable through the proxy"
+            return 0
+        fi
+        unset http_proxy https_proxy no_proxy   # proxy didn't help; don't drag it into apk
+    fi
+
+    echo ""
+    echo "ERROR: cannot reach ${LAN132_BASE} (required for luci-proto-xmm / xmm-modem)."
+    if clash_running; then
+        echo "  A proxy is running but this domain is still blocked. Allow it in your"
+        echo "  Mihomo config and reload, e.g.:"
+        echo "      rules:"
+        echo "        - DOMAIN-SUFFIX,132lan.ru,DIRECT   # or PROXY in whitelist mode"
+        echo "  Also check that mixed-port is 7890 (or pass CLASH_PROXY=http://IP:PORT)."
+    else
+        echo "  No Clash/Mihomo proxy detected and the host is unreachable directly."
+        echo "  Check the router's internet connection, then re-run."
+    fi
+    exit 1
+}
 
 # --- Ask for the APN up front so the rest can run unattended ---------------
 APN="$APN_DEFAULT"
@@ -77,76 +144,50 @@ echo "   Russian translations: $INSTALL_RU"
 # pulls xmm-modem, kmod-usb-net-cdc-ncm, kmod-usb-acm, kmod-usb-serial-option,
 # i.e. everything the L860-GL needs (cdc-acm gives us the /dev/ttyACM* AT port).
 say "Step 1: installing modem drivers (XMM proto via 132lan feed)"
+# Reachability + proxy routing BEFORE the first apk update: in whitelist mode
+# even the official feeds are reachable only through the proxy, so the env has
+# to be set first. From here on every apk update also refreshes the 132lan repo.
+ensure_feed_reachable
 apk update
 . /etc/openwrt_release
 REL="${DISTRIB_RELEASE%.*}"          # e.g. 25.12.4 -> 25.12
-cd /tmp && wget "${LAN132_BASE}/${REL}/packages/add.sh" -O - | sh
+cd /tmp
+dl "${LAN132_BASE}/${REL}/packages/add.sh" /tmp/add.sh
+sh /tmp/add.sh
 apk add luci-proto-xmm
 apk add sms-tool
 
-# --- 2. Add 4IceG apk repository (key first, then feed, roll back on failure)
-# Order matters: fetch a VALID key BEFORE adding the feed line. Otherwise a
-# failed key download (set -e) leaves the feed line in place, and every later
-# apk update on the router breaks with a non-obvious error.
+# --- 2. Add 4IceG apk repository (idempotent) ------------------------------
 say "Step 2: adding 4IceG apk repository"
+if ! grep -qF "$REPO_ADB" "$FEEDS" 2>/dev/null; then
+    echo "$REPO_ADB" >> "$FEEDS"
+    echo "   repo line added"
+else
+    echo "   repo line already present, skipping"
+fi
+
 mkdir -p "$KEYDIR"
-ICEG_KEY="$KEYDIR/IceG-apkpub.pem"
-
-# A leftover file doesn't prove the key is correct (a stale/foreign key gives
-# "UNTRUSTED signature"; behind a proxy an HTML error page may land here too).
-# So we check the PEM header, not just existence.
-key_ok() { [ -s "$1" ] && head -n1 "$1" | grep -q 'BEGIN PUBLIC KEY'; }
-
-if key_ok "$ICEG_KEY"; then
-    echo "   signing key present"
+if [ ! -s "$KEYDIR/IceG-apkpub.pem" ]; then
+    dl "$REPO_KEY" "$KEYDIR/IceG-apkpub.pem"
+    echo "   signing key installed"
 else
-    rm -f "$ICEG_KEY"
-    if wget -q "$REPO_KEY" -O "$ICEG_KEY" && key_ok "$ICEG_KEY"; then
-        echo "   signing key installed"
-    else
-        rm -f "$ICEG_KEY"
-        echo "   WARNING: could not fetch a valid 4IceG key — panels will be skipped"
-        echo "   (behind a proxy? try: /etc/init.d/clash stop, then re-run)"
-    fi
+    echo "   signing key already present, skipping"
 fi
-
-ICEG_OK=0
-if [ -s "$ICEG_KEY" ]; then
-    grep -qF "$REPO_ADB" "$FEEDS" 2>/dev/null || echo "$REPO_ADB" >> "$FEEDS"
-    if apk update; then
-        ICEG_OK=1
-    else
-        echo "   WARNING: apk update failed with the 4IceG feed — removing it again"
-        sed -i '\#4IceG/Modem-extras-apk#d' "$FEEDS" 2>/dev/null
-        apk update || true
-    fi
-else
-    # No key -> never leave the feed line behind (it would break apk update).
-    sed -i '\#4IceG/Modem-extras-apk#d' "$FEEDS" 2>/dev/null
-    apk update || true
-fi
+apk update
 
 # --- 3. Install the plugins ------------------------------------------------
-# Best-effort throughout: if the 4IceG feed is unavailable the modem still
-# comes up (the XMM interface below is built from the 132lan feed, which has
-# no redirect and works behind a proxy).
 say "Step 3: installing 3ginfo-lite, sms-tool-js and modemband"
-if [ "$ICEG_OK" = "1" ]; then
-    add_opt luci-app-3ginfo-lite
-    add_opt luci-app-sms-tool-js
-    # modemband: GUI band-locking for L860-GL (drives AT+XACT under the hood).
-    add_opt luci-app-modemband
+apk add luci-app-3ginfo-lite
+apk add luci-app-sms-tool-js
+# modemband: GUI band-locking for L860-GL (drives AT+XACT under the hood).
+apk add luci-app-modemband
 
-    if [ "$INSTALL_RU" = "yes" ]; then
-        say "Step 3: installing Russian translations"
-        add_opt luci-i18n-3ginfo-lite-ru
-        add_opt luci-i18n-sms-tool-js-ru
-        add_opt luci-i18n-modemband-ru
-    fi
-else
-    echo "   WARNING: 4IceG feed unavailable — skipping panels (3ginfo/sms-tool/modemband)."
-    echo "   The modem itself will still come up. Re-run after fixing feed access"
-    echo "   (behind a proxy? /etc/init.d/clash stop, then re-run this script)."
+if [ "$INSTALL_RU" = "yes" ]; then
+    say "Step 3: installing Russian translations"
+    # Installed best-effort: a missing -ru package can't abort the run.
+    apk add luci-i18n-3ginfo-lite-ru  || echo "   (3ginfo RU not in feed, skipping)"
+    apk add luci-i18n-sms-tool-js-ru  || echo "   (sms-tool-js RU not in feed, skipping)"
+    apk add luci-i18n-modemband-ru    || echo "   (modemband RU not in feed, skipping)"
 fi
 
 # --- 4. Detect + set the AT port -------------------------------------------
@@ -176,13 +217,9 @@ if [ "$AT_PORT" = "$AT_PORT_DEFAULT" ] && ! [ -c "$AT_PORT" ]; then
     echo "       ls -l /dev/ttyACM* ; sms_tool -d /dev/ttyACM0 at ATI"
     echo "   and if needed:  uci set 3ginfo.@3ginfo[0].device=/dev/ttyACMx; uci commit 3ginfo"
 fi
-# Guarded: if the 4IceG feed was unreachable, 3ginfo isn't installed and its
-# config doesn't exist -- skip rather than abort (the modem still comes up).
-if [ -f /etc/config/3ginfo ]; then
-    uci set 3ginfo.@3ginfo[0].device="$AT_PORT"
-    [ "$CREATE_INTERFACE" = "yes" ] && uci set 3ginfo.@3ginfo[0].network="$IFACE_NAME"
-    uci commit 3ginfo
-fi
+uci set 3ginfo.@3ginfo[0].device="$AT_PORT"
+[ "$CREATE_INTERFACE" = "yes" ] && uci set 3ginfo.@3ginfo[0].network="$IFACE_NAME"
+uci commit 3ginfo
 
 # --- 5. Create the XMM network interface -----------------------------------
 # Builds a ready-to-use interface: proto=xmm, the auto-detected modem port,
