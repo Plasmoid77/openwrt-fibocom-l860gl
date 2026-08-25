@@ -1,6 +1,1 @@
-# Keep shell scripts LF-only so they run on the router even when committed
-# from Windows (CRLF in a #!/bin/sh script breaks it on OpenWrt/BusyBox).
-* text=auto eol=lf
-*.sh text eol=lf
-LICENSE text eol=lf
-*.md text eol=lf
+﻿*.sh text eol=lf
