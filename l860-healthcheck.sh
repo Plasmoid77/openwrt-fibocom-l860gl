@@ -34,11 +34,19 @@ say "PDP context"
 at 'AT+CGCONTRDP=1' | sed -n '/CGCONTRDP:/p'
 
 say "OpenWrt interface"
-ifstatus "$IFACE_NAME" 2>/dev/null |
-	jsonfilter -e 'up=@.up' -e 'pending=@.pending' -e 'device=@.l3_device' \
-		-e 'address=@["ipv4-address"][0].address' -e 'dns=@["dns-server"][0]'
+STATUS="$(ifstatus "$IFACE_NAME" 2>/dev/null || true)"
+if [ -n "$STATUS" ]; then
+	printf 'up: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@.up')"
+	printf 'pending: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@.pending')"
+	printf 'available: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@.available')"
+	printf 'device: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@.l3_device')"
+	printf 'address: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address')"
+	printf 'dns: %s\n' "$(printf '%s' "$STATUS" | jsonfilter -e '@["dns-server"][0]')"
+else
+	echo "ERROR: OpenWrt interface $IFACE_NAME was not found"
+fi
 
-L3_DEVICE="$(ifstatus "$IFACE_NAME" 2>/dev/null | jsonfilter -e '@.l3_device')"
+L3_DEVICE="$(printf '%s' "$STATUS" | jsonfilter -e '@.l3_device')"
 if [ -n "$L3_DEVICE" ]; then
 	say "Connectivity"
 	ip link show "$L3_DEVICE" 2>/dev/null | sed -n '1p'
