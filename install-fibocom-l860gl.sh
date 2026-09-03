@@ -7,9 +7,8 @@
 # Installs: XMM proto/drivers (via 132lan modem feed), sms-tool,
 #           luci-app-3ginfo-lite + luci-app-sms-tool-js + luci-app-modemband
 #           (from 4IceG apk repo) + Russian translations,
-#           auto-detects and sets the AT port, and creates a ready-to-use
-#           XMM network interface (APN prompted at install time) in the
-#           firewall WAN zone.
+#           validates the AT port/SIM, creates a ready-to-use XMM interface,
+#           and installs reliable USB re-attach handling plus a health check.
 #
 # Differences vs the DW5821e script:
 #   - DW5821e = Qualcomm  -> MBIM stack, AT port /dev/ttyUSB1, needs CRLF JSON fix
@@ -44,13 +43,16 @@ REPO_ADB="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/pa
 REPO_KEY="https://raw.githubusercontent.com/4IceG/Modem-extras-apk/main/myapk/IceG-apkpub.pem"
 LAN132_BASE="https://openwrt.132lan.ru/packages"
 CLASH_PROXY_DEFAULT="http://127.0.0.1:7890"   # ssclash/Mihomo mixed-port default
+PROJECT_RAW_BASE="${PROJECT_RAW_BASE:-https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main}"
+HOTPLUG_URL="${PROJECT_RAW_BASE}/files/99-l860-autostart"
+HEALTHCHECK_URL="${PROJECT_RAW_BASE}/l860-healthcheck.sh"
 
 # --- Network interface settings --------------------------------------------
 CREATE_INTERFACE="yes"          # yes | no  -- create the XMM interface
 IFACE_NAME="LTE_Fibocom_860"    # interface (and UCI section) name
 FW_ZONE="wan"                   # firewall zone to place the interface into
-APN_DEFAULT="internet"          # used if you just press Enter at the prompt
-PDP_TYPE="IPV4V6"               # IP (IPv4) | IPV6 | IPV4V6 (dual-stack)
+APN_DEFAULT=""                  # empty = use the operator's subscription APN
+PDP_TYPE="IP"                   # IP (IPv4) | IPV6 | IPV4V6 (dual-stack)
 PIN_CODE=""                     # SIM PIN, leave empty if the SIM has none
 
 # --- 4IceG panel settings --------------------------------------------------
@@ -125,10 +127,15 @@ ensure_feed_reachable() {
 # --- Ask for the APN up front so the rest can run unattended ---------------
 APN="$APN_DEFAULT"
 if [ "$CREATE_INTERFACE" = "yes" ]; then
-    printf 'APN for the LTE interface [%s]: ' "$APN_DEFAULT"
+    APN_PROMPT="${APN_DEFAULT:-automatic/operator default}"
+    printf 'APN for the LTE interface [%s]: ' "$APN_PROMPT"
     read -r apn_input || apn_input=""
     [ -n "$apn_input" ] && APN="$apn_input"
-    echo "   using APN: $APN"
+    if [ -n "$APN" ]; then
+        echo "   using explicit APN: $APN"
+    else
+        echo "   using automatic APN supplied by the operator"
+    fi
 fi
 
 # --- Ask whether to install Russian translations ---------------------------
@@ -197,19 +204,18 @@ if [ "$INSTALL_RU" = "yes" ]; then
 fi
 
 # --- 4. Detect + set the AT port -------------------------------------------
-# L860-GL exposes several /dev/ttyACM* ports; only one answers AT commands.
-# We probe ttyACM0..3 with ATI and pick the one that identifies as Fibocom/L860
-# (falling back to the first AT-capable port, then to the default).
+# L860-GL exposes several /dev/ttyACM* ports; only one is the primary AT port.
+# CGMM identifies the model more reliably than ATI on some L860-GL-16 firmware.
 say "Step 4: detecting modem AT port"
 AT_PORT=""
 if command -v sms_tool >/dev/null 2>&1; then
     for p in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyACM2 /dev/ttyACM3; do
         [ -c "$p" ] || continue
-        resp="$(sms_tool -d "$p" at "ATI" 2>/dev/null || true)"
+        resp="$(sms_tool -d "$p" at "AT+CGMM" 2>/dev/null || true)"
         if echo "$resp" | grep -qiE 'Fibocom|L860'; then
             AT_PORT="$p"; break
         fi
-        if [ -z "$AT_PORT" ] && echo "$resp" | grep -qi 'OK'; then
+        if [ -z "$AT_PORT" ] && echo "$resp" | grep -qiE 'OK|L860|Fibocom'; then
             AT_PORT="$p"   # remember first AT-capable port, keep looking for L860
         fi
     done
@@ -220,34 +226,49 @@ say "Step 4: setting AT port to $AT_PORT"
 if [ "$AT_PORT" = "$AT_PORT_DEFAULT" ] && ! [ -c "$AT_PORT" ]; then
     echo "   NOTE: could not probe a live AT port (modem may enumerate after reboot)."
     echo "   Using default $AT_PORT. Verify after reboot with:"
-    echo "       ls -l /dev/ttyACM* ; sms_tool -d /dev/ttyACM0 at ATI"
-    echo "   and if needed:  uci set 3ginfo.@3ginfo[0].device=/dev/ttyACMx; uci commit 3ginfo"
+    echo "       l860-healthcheck"
 fi
+
+SIM_STATE="$(sms_tool -d "$AT_PORT" at 'AT+CPIN?' 2>/dev/null || true)"
+case "$SIM_STATE" in
+    *"CPIN: READY"*) echo "   SIM state: READY" ;;
+    *"SIM PIN"*)     echo "   WARNING: SIM requires a PIN; configure PIN_CODE before use." ;;
+    *"SIM NOT INSERTED"*)
+        echo "   WARNING: modem reports SIM NOT INSERTED. This is not an APN error."
+        echo "   Power off the adapter, reseat the physical SIM, then run l860-healthcheck."
+    ;;
+    *) echo "   WARNING: SIM state could not be confirmed yet; check after reboot." ;;
+esac
+
 uci set 3ginfo.@3ginfo[0].device="$AT_PORT"
 [ "$CREATE_INTERFACE" = "yes" ] && uci set 3ginfo.@3ginfo[0].network="$IFACE_NAME"
 uci commit 3ginfo
 
 # --- 5. Create the XMM network interface -----------------------------------
 # Builds a ready-to-use interface: proto=xmm, the auto-detected modem port,
-# the APN entered above, and membership in the WAN firewall zone.
+# the APN mode selected above, and membership in the WAN firewall zone.
 if [ "$CREATE_INTERFACE" = "yes" ]; then
-    say "Step 5: creating interface '$IFACE_NAME' (proto xmm, port $AT_PORT, APN $APN)"
+    APN_LABEL="${APN:-automatic}"
+    say "Step 5: creating interface '$IFACE_NAME' (proto xmm, port $AT_PORT, APN $APN_LABEL)"
 
     uci set network."$IFACE_NAME"=interface
     uci set network."$IFACE_NAME".proto='xmm'
     uci set network."$IFACE_NAME".device="$AT_PORT"
     uci set network."$IFACE_NAME".apn="$APN"
-    uci set network."$IFACE_NAME".pdptype="$PDP_TYPE"
+    uci -q delete network."$IFACE_NAME".pdptype || true
+    uci set network."$IFACE_NAME".pdp="$PDP_TYPE"
     uci set network."$IFACE_NAME".auth='none'
     if [ -n "$PIN_CODE" ]; then
         uci set network."$IFACE_NAME".pincode="$PIN_CODE"
+    else
+        uci -q delete network."$IFACE_NAME".pincode || true
     fi
     uci commit network
 
     # Put the interface into the firewall zone (default: wan).
     ZONE_SECT="$(uci show firewall 2>/dev/null | grep "\.name='${FW_ZONE}'" | head -n1 | sed "s/\.name='${FW_ZONE}'.*//")"
     if [ -n "$ZONE_SECT" ]; then
-        uci -q del_list "${ZONE_SECT}".network="$IFACE_NAME"   # avoid duplicates
+        uci -q del_list "${ZONE_SECT}".network="$IFACE_NAME" || true
         uci add_list "${ZONE_SECT}".network="$IFACE_NAME"
         uci commit firewall
         echo "   added '$IFACE_NAME' to firewall zone '$FW_ZONE'"
@@ -288,23 +309,35 @@ if [ -f /etc/config/sms_tool_js ]; then
     echo "   sms-tool: prefix=$SMS_PREFIX, all ports=$AT_PORT"
 fi
 
-# --- 7. Restart web UI -----------------------------------------------------
-say "Step 7: restarting web interface"
+# --- 7. Reliable USB re-attach + diagnostics -------------------------------
+say "Step 7: installing L860 USB hotplug and health-check helpers"
+mkdir -p /etc/hotplug.d/usb
+dl "$HOTPLUG_URL" /tmp/99-l860-autostart
+cp /tmp/99-l860-autostart /etc/hotplug.d/usb/99-l860-autostart
+chmod 0755 /etc/hotplug.d/usb/99-l860-autostart
+
+dl "$HEALTHCHECK_URL" /tmp/l860-healthcheck
+cp /tmp/l860-healthcheck /usr/bin/l860-healthcheck
+chmod 0755 /usr/bin/l860-healthcheck
+echo "   installed /etc/hotplug.d/usb/99-l860-autostart"
+echo "   installed /usr/bin/l860-healthcheck"
+
+# --- 8. Restart web UI -----------------------------------------------------
+say "Step 8: restarting web interface"
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart
 
-# --- 8. Reboot -------------------------------------------------------------
+# --- 9. Reboot -------------------------------------------------------------
 # A full reboot ensures modem drivers, ttyACM ports and the web UI all come
 # up cleanly from scratch. The reminder is printed BEFORE the countdown so
 # there's time to read it (and cancel with Ctrl+C).
-say "Step 8: installation complete"
+say "Step 9: installation complete"
 echo "    После перезагрузки:"
 echo "      - LuCI -> Network -> Interfaces: у '$IFACE_NAME' должны появиться Carrier/RX/TX."
-echo "        Если Carrier остаётся 'Absent' — обычно дело в APN (исправь и Save & Apply)."
+echo "      - Проверка одной командой: l860-healthcheck"
 echo "      - LuCI -> Modem(s): обнови Ctrl+F5 для сигнала / оператора / бэнда."
-echo "    Если 3ginfo не показывает данные модема — проверь AT-порт:"
-echo "        ls -l /dev/ttyACM* ; sms_tool -d /dev/ttyACM0 at ATI"
-echo "        uci set 3ginfo.@3ginfo[0].device=/dev/ttyACMx; uci commit 3ginfo; /etc/init.d/uhttpd restart"
+echo "    При замене SIM можно перезапустить только USB-адаптер: hotplug hook"
+echo "    дождётся модема и автоматически поднимет '$IFACE_NAME'."
 
 echo ""
 echo ">>> Перезагрузка через 10 секунд (Ctrl+C — отмена)"

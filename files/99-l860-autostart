@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Reliable USB re-attach handling for Fibocom L860-GL / Intel XMM7560.
+# The modem is a composite USB device and emits several add events.  The
+# stock xmm hotplug hook can start netifd before ACM/NCM enumeration settles,
+# while a late teardown can then reset the newly-created data channel.
+
+case "${PRODUCT:-}" in
+	8087/095a/*|8087/95a/*) ;;
+	*) exit 0 ;;
+esac
+
+find_xmm_interface() {
+	for section in $(uci -q show network | sed -n "s/^network\.\([^.=]*\)\.proto='xmm'$/\1/p"); do
+		device="$(uci -q get "network.${section}.device")"
+		case "$device" in
+			/dev/ttyACM*) echo "$section"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+ncm_present() {
+	for path in /sys/class/net/wwan*; do
+		[ -d "$path" ] && return 0
+	done
+	return 1
+}
+
+INTERFACE="$(find_xmm_interface)"
+[ -n "$INTERFACE" ] || exit 0
+
+STAMP="/tmp/l860-hotplug.stamp"
+. /lib/netifd/netifd-proto.sh
+
+if [ "$ACTION" = "remove" ]; then
+	proto_set_available "$INTERFACE" 0
+	rm -f "$STAMP"
+	exit 0
+fi
+
+[ "$ACTION" = "add" ] || exit 0
+
+# Serialise the composite device's duplicate add events.
+exec 9>/tmp/l860-hotplug.lock
+flock -n 9 || exit 0
+
+now="$(date +%s)"
+last="$(cat "$STAMP" 2>/dev/null || true)"
+case "$last" in
+	''|*[!0-9]*) ;;
+	*) [ $((now - last)) -lt 90 ] && exit 0 ;;
+esac
+printf '%s\n' "$now" > "$STAMP"
+
+# The package-provided 01_xmm.sh runs before this hook and may already have
+# started an early setup.  Block further starts while enumeration settles.
+proto_set_available "$INTERFACE" 0
+
+DEVICE="$(uci -q get "network.${INTERFACE}.device")"
+[ -n "$DEVICE" ] || exit 0
+
+for _ in $(seq 1 20); do
+	[ -c "$DEVICE" ] && ncm_present && break
+	sleep 1
+done
+
+if [ ! -c "$DEVICE" ] || ! ncm_present; then
+	logger -t l860-hotplug "L860 enumeration timed out; returning control to netifd"
+	proto_set_available "$INTERFACE" 1
+	rm -f "$STAMP"
+	exit 0
+fi
+
+# Cancel the early package-triggered attempt and wait until its teardown is
+# complete.  Starting sooner lets its late xmm-disconnect kill the new NCM
+# data channel a few seconds after it comes up.
+/sbin/ifdown "$INTERFACE" >/dev/null 2>&1
+for _ in $(seq 1 30); do
+	STATUS="$(ubus call "network.interface.${INTERFACE}" status 2>/dev/null)"
+	UP="$(printf '%s' "$STATUS" | jsonfilter -e '@.up')"
+	PENDING="$(printf '%s' "$STATUS" | jsonfilter -e '@.pending')"
+	[ "$UP" != "true" ] && [ "$PENDING" != "true" ] && break
+	sleep 1
+done
+
+# Give SIM initialisation and LTE registration a short head start.  The XMM
+# protocol handler retains its own retry logic if the network needs longer.
+sleep 10
+
+proto_set_available "$INTERFACE" 1
+sleep 1
+
+STATUS="$(ubus call "network.interface.${INTERFACE}" status 2>/dev/null)"
+UP="$(printf '%s' "$STATUS" | jsonfilter -e '@.up')"
+PENDING="$(printf '%s' "$STATUS" | jsonfilter -e '@.pending')"
+
+if [ "$UP" != "true" ] && [ "$PENDING" != "true" ]; then
+	logger -t l860-hotplug "L860 settled; starting ${INTERFACE}"
+	/sbin/ifup "$INTERFACE"
+fi

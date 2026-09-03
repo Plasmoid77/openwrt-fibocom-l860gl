@@ -8,6 +8,13 @@
 
 ---
 
+Это полевой fork проекта [lastik9/openwrt-fibocom-l860gl](https://github.com/lastik9/openwrt-fibocom-l860gl).
+Он сохраняет исходную установку панелей и XMM-стека, но исправляет проблемы,
+воспроизведённые на L860-GL-16: неверный UCI-параметр PDP, диагностику SIM,
+автоматический APN и повторное подключение USB без перезагрузки роутера.
+
+Подробный разбор: **[L860-GL-16 на OpenWrt 25: диагностика и исправления](docs/TROUBLESHOOTING.ru.md)**.
+
 Скрипт устанавливает всё, что нужно для работы и мониторинга модема Fibocom L860-GL на OpenWrt 25, и сам создаёт готовый к работе интерфейс. Второй скрипт — деинсталлятор — начисто откатывает изменения (удобно для тестов без перепрошивки).
 
 ### Зачем
@@ -16,14 +23,15 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 
 ### Что делает скрипт
 
-1. Спрашивает **APN** (по умолчанию `internet`) и хотите ли ставить **русский язык** для панелей (`[Y/n]`).
+1. Спрашивает **APN** (пустое значение — автоматический Default APN оператора) и хотите ли ставить **русский язык** для панелей (`[Y/n]`).
 2. Подключает модемный фид [132lan](https://openwrt.132lan.ru) и ставит XMM-стек: `luci-proto-xmm`, `xmm-modem`, `kmod-usb-acm`, `kmod-usb-net-cdc-ncm`, `kmod-usb-serial-option` и др., плюс `sms-tool`.
 3. Подключает apk-репозиторий [4IceG/Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) и его ключ (идемпотентно, рядом с фидом 132lan).
 4. Ставит панели `luci-app-3ginfo-lite`, `luci-app-sms-tool-js`, `luci-app-modemband` (+ русские локали, если выбрано).
-5. **Автоопределяет AT-порт**: опрашивает `ttyACM0..3` командой `ATI` и выбирает тот, что отвечает как Fibocom/L860 (с откатом на `/dev/ttyACM0`).
-6. Создаёт интерфейс **`LTE_Fibocom_860`** (proto `xmm`, найденный порт, введённый APN, `pdptype`) и добавляет его в firewall-зону `wan`.
+5. **Автоопределяет AT-порт** через `AT+CGMM`, проверяет SIM командой `AT+CPIN?` и отдельно сообщает `SIM NOT INSERTED`/`SIM PIN`.
+6. Создаёт интерфейс **`LTE_Fibocom_860`** (proto `xmm`, найденный порт, APN, корректный параметр `pdp`) и добавляет его в firewall-зону `wan`.
 7. Настраивает панели под найденный порт: 3ginfo (`device` + `network`), modemband (`set_port` + `iface`), sms-tool (5 портов), и меняет SMS-префикс на `7`.
-8. Перезагружает роутер (с 10-секундным отсчётом и возможностью отмены `Ctrl+C`).
+8. Ставит USB-hotplug hook для автоматического восстановления после отключения/замены модема и команду `l860-healthcheck`.
+9. Перезагружает роутер (с 10-секундным отсчётом и возможностью отмены `Ctrl+C`).
 
 ### Требования
 
@@ -37,18 +45,24 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 Команды выполняются **на роутере** (по SSH):
 
 ```
-wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
 После перезагрузки открой **LuCI → Network → Interfaces** (у `LTE_Fibocom_860` должны появиться Carrier/RX/TX) и **LuCI → Modem(s)** (обнови Ctrl+F5 — сигнал, оператор, бэнд).
 
-Настройки вынесены в переменные в шапке скрипта: имя интерфейса, firewall-зона, APN по умолчанию, тип PDP, PIN, SMS-префикс — при желании правятся в одном месте.
+После перезагрузки полная безопасная проверка выполняется одной командой:
+
+```
+l860-healthcheck
+```
+
+Настройки вынесены в переменные в шапке скрипта: имя интерфейса, firewall-зона, APN, тип PDP, PIN, SMS-префикс — при желании правятся в одном месте.
 
 ### Удаление
 
 ```
-wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -76,8 +90,10 @@ sh uninstall-fibocom-l860gl.sh
   ```
 
 - **`wget` сохранил файл как `index.html`** — за прокси busybox-`wget` теряет имя из URL. Всегда качай с явным именем: `wget -O install-fibocom-l860gl.sh <URL>`.
-- **`Failed add repository modem_kmod!`** при работе `add.sh` 132lan — безвредно. Нужные драйверы (`xmm-modem`, `kmod-*`) ставятся из официальных фидов OpenWrt, на установку это не влияет.
-- **`Carrier: Absent` после установки** — почти всегда неверный **APN**. Он зависит от оператора: скрипт по умолчанию ставит `internet`, но у части тарифов он другой. Исправь APN в интерфейсе и `Save & Apply`.
+- **`Failed add repository modem_kmod!`** при работе `add.sh` 132lan — в проверенной конфигурации безвредно: основной `modemfeed` добавился, а совместимые с ядром `kmod-*` были доступны в официальном фиде OpenWrt. Важно проверить, что последующая установка `xmm-modem` и `luci-proto-xmm` завершилась успешно.
+- **`Carrier: Absent` после установки** — не начинай с замены APN. Сначала выполни `l860-healthcheck`: должны последовательно присутствовать USB/ACM/NCM, `CPIN: READY`, регистрация `CEREG: ...,1/5`, PDP-контекст, `wwan0 LOWER_UP` и ping. `SIM NOT INSERTED` устраняется только обесточиванием адаптера и переустановкой физической SIM.
+- **Обычные SIM разных операторов** — оставь APN пустым. Beeline, MegaFon и T2 в тестах сами выдали соответственно `internet.beeline.ru`, `internet` и `INTERNET.TELE2.RU`. Явный APN нужен только как fallback.
+- **После перезапуска USB-модема интерфейс не вернулся** — этот fork устанавливает `99-l860-autostart`, который устраняет гонку составного USB-устройства с ранним XMM teardown/ifup. Проверка: `logread -e l860-hotplug`.
 - **3ginfo не показывает данные** — проверь AT-порт (`ls -l /dev/ttyACM*`, затем `sms_tool -d /dev/ttyACM0 at ATI`). Если рабочий порт другой — поправь `device` в 3ginfo.
 - **Лок бэндов** через modemband или `AT+XACT` — осторожно: если залочить бэнд, которого нет в твоей точке, модем не зарегистрируется. Откат: `AT+XACT=2,,,0` (разрешить все LTE-бэнды). Нумерация LTE-бэндов в `AT+XACT` со сдвигом +100 (B3 → 103, B7 → 107, B20 → 120).
 - **Правишь скрипты на Windows?** Сохраняй в переводах строк **LF (Unix)**. CRLF в `#!/bin/sh` ломает запуск на роутере. В репозитории это подстраховано файлом `.gitattributes`.
@@ -86,10 +102,12 @@ sh uninstall-fibocom-l860gl.sh
 
 ```
 ls -l /dev/ttyACM*                                   # порты модема
-sms_tool -d /dev/ttyACM0 at 'ATI'                    # ответ модема
+sms_tool -d /dev/ttyACM0 at 'AT+CGMM'                # точная модель
+sms_tool -d /dev/ttyACM0 at 'AT+CPIN?'               # состояние SIM
 sms_tool -d /dev/ttyACM0 at 'AT+CSQ'                 # сигнал (xx,yy)
 sms_tool -d /dev/ttyACM0 at 'AT+COPS?'               # оператор
-sms_tool -d /dev/ttyACM0 at 'AT+CGDCONT?'            # настроенный APN
+sms_tool -d /dev/ttyACM0 at 'AT+CEREG?'              # LTE-регистрация
+sms_tool -d /dev/ttyACM0 at 'AT+CGCONTRDP=1'         # фактический APN/IP/DNS
 uci show network.LTE_Fibocom_860                     # конфиг интерфейса
 uci show 3ginfo; uci show modemband; uci show sms_tool_js
 ifstatus LTE_Fibocom_860 | grep -i up                # поднят ли интерфейс
@@ -98,11 +116,17 @@ logread | grep -i xmm                                # лог протокола
 
 ### Проверено на
 
-OpenWrt 25.12.x (mediatek/filogic, `aarch64_cortex-a53`), модем Fibocom L860-GL-16, оператор Yota.
+OpenWrt 25.12.5 (mediatek/filogic, `aarch64_cortex-a53`), Fibocom L860-GL-16.
+
+- Beeline: автоматический APN, LTE-A B7+B20, IPv4/DNS/ping;
+- MegaFon: автоматический APN, LTE-A B7+B7, IPv4/DNS/ping;
+- T2: автоматический APN, LTE-A B7+B3/B1, IPv4/DNS/ping;
+- физический power-cycle адаптера: интерфейс восстановлен автоматически без перезагрузки OpenWrt.
 
 ### Благодарности
 
-Проект — лишь установщик. Основная работа сделана в проектах **[4IceG](https://github.com/4IceG)**:
+Основа установщика — проект **[lastik9/openwrt-fibocom-l860gl](https://github.com/lastik9/openwrt-fibocom-l860gl)**.
+Основная работа модемного стека и панелей сделана в проектах **[4IceG](https://github.com/4IceG)**:
 
 - [luci-app-3ginfo-lite](https://github.com/4IceG/luci-app-3ginfo-lite) — панель мониторинга модема
 - [luci-app-sms-tool-js](https://github.com/4IceG/luci-app-sms-tool-js) — SMS / USSD / AT-команды
@@ -115,4 +139,4 @@ OpenWrt 25.12.x (mediatek/filogic, `aarch64_cortex-a53`), модем Fibocom L86
 
 ### Лицензия
 
-[MIT](LICENSE) © 2026 lastik9
+[MIT](LICENSE) © 2026 lastik9, field fixes © 2026 Plasmoid77

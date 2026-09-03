@@ -8,6 +8,13 @@ One-shot installer for the **Fibocom L860-GL** (Intel XMM7560) modem on **OpenWr
 
 ---
 
+This is a field-tested fork of
+[lastik9/openwrt-fibocom-l860gl](https://github.com/lastik9/openwrt-fibocom-l860gl).
+It fixes the UCI PDP option, distinguishes SIM/contact failures from APN
+failures, defaults to the operator-provided APN, and restores XMM after a USB
+power-cycle. See the [English field notes](docs/TROUBLESHOOTING.en.md) or the
+[full Russian report](docs/TROUBLESHOOTING.ru.md).
+
 One-shot installer that brings up a **Fibocom L860-GL** (Intel XMM7560) modem on **OpenWrt 25 (apk)**: XMM drivers, a ready-to-use network interface, and the [4IceG](https://github.com/4IceG) panels (`3ginfo-lite`, `sms-tool-js`, `modemband`). A companion uninstaller reverts everything cleanly.
 
 ### Why
@@ -16,14 +23,15 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 
 ### What the script does
 
-1. Prompts for the **APN** (default `internet`) and whether to install **Russian** panel translations (`[Y/n]`).
+1. Prompts for the **APN** (empty means the operator's subscription Default APN) and whether to install **Russian** panel translations (`[Y/n]`).
 2. Adds the [132lan](https://openwrt.132lan.ru) modem feed and installs the XMM stack: `luci-proto-xmm`, `xmm-modem`, `kmod-usb-acm`, `kmod-usb-net-cdc-ncm`, `kmod-usb-serial-option`, etc., plus `sms-tool`.
 3. Adds the [4IceG/Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) apk repo and key (idempotent, alongside the 132lan feed).
 4. Installs `luci-app-3ginfo-lite`, `luci-app-sms-tool-js`, `luci-app-modemband` (+ RU locales if chosen).
-5. **Auto-detects the AT port**: probes `ttyACM0..3` with `ATI` and picks the one identifying as Fibocom/L860 (falls back to `/dev/ttyACM0`).
-6. Creates the **`LTE_Fibocom_860`** interface (proto `xmm`, the detected port, the entered APN, `pdptype`) and adds it to the `wan` firewall zone.
+5. **Auto-detects the AT port** with `AT+CGMM` and checks SIM state with `AT+CPIN?`.
+6. Creates the **`LTE_Fibocom_860`** interface using the XMM handler's actual `pdp` UCI option and adds it to the `wan` firewall zone.
 7. Points the panels at the detected port: 3ginfo (`device` + `network`), modemband (`set_port` + `iface`), sms-tool (5 ports), and sets the SMS prefix to `7`.
-8. Reboots the router (10-second countdown, cancel with `Ctrl+C`).
+8. Installs reliable USB re-attach handling and the `l860-healthcheck` command.
+9. Reboots the router (10-second countdown, cancel with `Ctrl+C`).
 
 ### Requirements
 
@@ -37,7 +45,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 Run **on the router** (over SSH):
 
 ```
-wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
+wget -O install-fibocom-l860gl.sh https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main/install-fibocom-l860gl.sh
 sh install-fibocom-l860gl.sh
 ```
 
@@ -48,7 +56,7 @@ Settings live in variables at the top of the script: interface name, firewall zo
 ### Uninstall
 
 ```
-wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/lastik9/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
+wget -O uninstall-fibocom-l860gl.sh https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main/uninstall-fibocom-l860gl.sh
 sh uninstall-fibocom-l860gl.sh
 ```
 
@@ -76,8 +84,10 @@ The uninstaller removes the interface and its firewall membership, deletes the p
   ```
 
 - **`wget` saved the file as `index.html`** — behind a proxy busybox `wget` loses the name from the URL. Always download with an explicit name: `wget -O install-fibocom-l860gl.sh <URL>`.
-- **`Failed add repository modem_kmod!`** during the 132lan `add.sh` — harmless. The needed drivers (`xmm-modem`, `kmod-*`) come from the official OpenWrt feeds; install is unaffected.
-- **`Carrier: Absent` after install** — almost always a wrong **APN**. It's carrier-specific: the script defaults to `internet`, but some plans differ. Fix the APN on the interface and `Save & Apply`.
+- **`Failed add repository modem_kmod!`** from the 132lan `add.sh` was harmless in the tested setup: the main `modemfeed` was added and matching `kmod-*` packages were available from the official OpenWrt feed. Verify that the following `xmm-modem` and `luci-proto-xmm` installation succeeds.
+- **`Carrier: Absent` after install** — do not assume APN first. Run `l860-healthcheck` and verify USB, `CPIN: READY`, LTE registration, PDP context, `wwan0 LOWER_UP`, and ping in that order. `SIM NOT INSERTED` is a physical SIM/contact fault.
+- **Ordinary SIMs from different carriers** — leave APN empty. Beeline, MegaFon and T2 supplied their correct Default APN during field tests.
+- **No reconnect after modem USB power-cycle** — this fork installs `99-l860-autostart` to serialise composite-device events and avoid overlapping XMM teardown/setup.
 - **3ginfo shows no data** — verify the AT port (`ls -l /dev/ttyACM*`, then `sms_tool -d /dev/ttyACM0 at ATI`). If the working port differs, update `device` in 3ginfo.
 - **Band locking** via modemband or `AT+XACT` — careful: locking a band that isn't present where you are will prevent registration. Undo with `AT+XACT=2,,,0` (allow all LTE bands). LTE band numbers in `AT+XACT` are offset by +100 (B3 → 103, B7 → 107, B20 → 120).
 - **Editing the scripts on Windows?** Save with **LF (Unix)** line endings. A CRLF in `#!/bin/sh` breaks execution on the router. The repo's `.gitattributes` guards against this.
@@ -98,7 +108,7 @@ logread | grep -i xmm                                # XMM proto log
 
 ### Tested on
 
-OpenWrt 25.12.x (mediatek/filogic, `aarch64_cortex-a53`), Fibocom L860-GL-16 modem, Yota carrier.
+OpenWrt 25.12.5 (mediatek/filogic, `aarch64_cortex-a53`), Fibocom L860-GL-16, ordinary Beeline, MegaFon and T2 SIMs, including a physical modem-adapter power-cycle.
 
 ### Acknowledgments
 

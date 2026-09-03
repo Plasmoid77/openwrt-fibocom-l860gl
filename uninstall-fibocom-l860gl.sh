@@ -7,7 +7,7 @@
 # Removes: the LTE interface + its firewall membership; the 4IceG/XMM
 # packages (deps like xmm-modem, modemband and the kmods are pulled out too);
 # the panel config files (3ginfo, modemband, sms_tool_js); and the added
-# apk feeds (4IceG + 132lan) plus the IceG signing key.
+# apk feeds (4IceG + 132lan), the IceG signing key, and L860 helper scripts.
 #
 # NOTE: if you changed IFACE_NAME / FW_ZONE in the installer, match them here.
 #
@@ -62,6 +62,8 @@ echo "   packages removed"
 # --- 3. Remove panel config files ------------------------------------------
 say "Removing leftover configs"
 rm -f /etc/config/3ginfo /etc/config/modemband /etc/config/sms_tool_js
+rm -f /etc/hotplug.d/usb/99-l860-autostart /usr/bin/l860-healthcheck
+rm -f /tmp/l860-hotplug.lock /tmp/l860-hotplug.stamp
 
 # --- 4. Remove added apk feeds + IceG key ----------------------------------
 say "Removing added apk feeds and key"
