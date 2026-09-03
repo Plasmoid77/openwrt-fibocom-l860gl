@@ -4,7 +4,7 @@ One-shot installer for the **Fibocom L860-GL** (Intel XMM7560) modem on **OpenWr
 
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue) ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-[Русский](README.md) · **English** · [中文](README.zh.md)
+[Русский](README.md) · **English**
 
 ---
 

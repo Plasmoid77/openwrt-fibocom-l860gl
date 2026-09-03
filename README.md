@@ -4,7 +4,7 @@
 
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-25.x%20(apk)-blue) ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-green) ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-**Русский** · [English](README.en.md) · [中文](README.zh.md)
+**Русский** · [English](README.en.md)
 
 ---
 
