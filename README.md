@@ -23,7 +23,7 @@ L860-GL — это M.2-модем на чипе Intel XMM7560. В отличие
 
 ### Что делает скрипт
 
-1. Спрашивает **APN** (пустое значение — автоматический Default APN оператора) и хотите ли ставить **русский язык** для панелей (`[Y/n]`).
+1. Спрашивает **APN** и хотите ли ставить **русский язык** для панелей. В обоих запросах достаточно нажать Enter: по умолчанию используются автоматический Default APN оператора и русская локализация.
 2. Подключает модемный фид [132lan](https://openwrt.132lan.ru) и ставит XMM-стек: `luci-proto-xmm`, `xmm-modem`, `kmod-usb-acm`, `kmod-usb-net-cdc-ncm`, `kmod-usb-serial-option` и др., плюс `sms-tool`.
 3. Подключает apk-репозиторий [4IceG/Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) и его ключ (идемпотентно, рядом с фидом 132lan).
 4. Ставит панели `luci-app-3ginfo-lite`, `luci-app-sms-tool-js`, `luci-app-modemband` (+ русские локали, если выбрано).

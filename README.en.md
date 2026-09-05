@@ -23,7 +23,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 
 ### What the script does
 
-1. Prompts for the **APN** (empty means the operator's subscription Default APN) and whether to install **Russian** panel translations (`[Y/n]`).
+1. Prompts for the **APN** and whether to install **Russian** panel translations. Pressing Enter at both prompts accepts the defaults: the operator-provided APN and Russian translations.
 2. Adds the [132lan](https://openwrt.132lan.ru) modem feed and installs the XMM stack: `luci-proto-xmm`, `xmm-modem`, `kmod-usb-acm`, `kmod-usb-net-cdc-ncm`, `kmod-usb-serial-option`, etc., plus `sms-tool`.
 3. Adds the [4IceG/Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) apk repo and key (idempotent, alongside the 132lan feed).
 4. Installs `luci-app-3ginfo-lite`, `luci-app-sms-tool-js`, `luci-app-modemband` (+ RU locales if chosen).

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- make automatic APN and Russian translations explicit Enter-key defaults in
+  the interactive installer;
+- accept `auto` and `automatic` as aliases for the operator-provided APN.
+
 ## 1.1.0 — 2026-09-03 — Plasmoid77 field fixes
 
 Based on upstream commit `8a3f895` from

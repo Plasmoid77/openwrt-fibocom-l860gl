@@ -128,9 +128,13 @@ ensure_feed_reachable() {
 APN="$APN_DEFAULT"
 if [ "$CREATE_INTERFACE" = "yes" ]; then
     APN_PROMPT="${APN_DEFAULT:-automatic/operator default}"
-    printf 'APN for the LTE interface [%s]: ' "$APN_PROMPT"
+    printf 'APN for the LTE interface [%s] (press Enter to accept): ' "$APN_PROMPT"
     read -r apn_input || apn_input=""
-    [ -n "$apn_input" ] && APN="$apn_input"
+    case "$apn_input" in
+        "") APN="$APN_DEFAULT" ;;
+        [Aa][Uu][Tt][Oo]|[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Cc]) APN="" ;;
+        *) APN="$apn_input" ;;
+    esac
     if [ -n "$APN" ]; then
         echo "   using explicit APN: $APN"
     else
@@ -141,7 +145,7 @@ fi
 # --- Ask whether to install Russian translations ---------------------------
 # Covers all three 4IceG panels: 3ginfo-lite, sms-tool-js and modemband.
 INSTALL_RU="yes"
-printf 'Install Russian translations for the 4IceG panels? [Y/n]: '
+printf 'Install Russian translations for the 4IceG panels? [Yes/no, default: Yes]: '
 read -r ru_input || ru_input=""
 case "$ru_input" in
     [Nn]*) INSTALL_RU="no" ;;
