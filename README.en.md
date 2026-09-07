@@ -90,6 +90,36 @@ The uninstaller removes the interface and its firewall membership, deletes the p
 - **No reconnect after modem USB power-cycle** — this fork installs `99-l860-autostart` to serialise composite-device events and avoid overlapping XMM teardown/setup.
 - **3ginfo shows no data** — verify the AT port (`ls -l /dev/ttyACM*`, then `sms_tool -d /dev/ttyACM0 at ATI`). If the working port differs, update `device` in 3ginfo.
 - **Band locking** via modemband or `AT+XACT` — careful: locking a band that isn't present where you are will prevent registration. Undo with `AT+XACT=2,,,0` (allow all LTE bands). LTE band numbers in `AT+XACT` are offset by +100 (B3 → 103, B7 → 107, B20 → 120).
+- **LTE is connected but the traffic does not use it** — happens when a second uplink
+  is still configured: a temporary Wi-Fi station (`wifi-iface` in `sta` mode), for
+  instance, used to bootstrap the modem installation on a router with no wired
+  internet. `LTE_Fibocom_860` is `up`, `l860-healthcheck` returns 0, and the default
+  route belongs to the other interface. Both interfaces publish a default route and
+  neither has a `metric`, so with equal priority whichever came up last wins. Check
+  with:
+
+    ```
+    ip route show default
+    ip route get 1.1.1.1
+    ```
+
+    Fix it with a metric on the **second** uplink. LTE becomes primary and the other
+    link stays as an automatic fallback for when the cellular network drops:
+
+    ```
+    uci set network.<other_uplink>.metric=100
+    uci commit network
+    /etc/init.d/network reload
+    ```
+
+    If LTE still has no default route afterwards, re-run its setup:
+
+    ```
+    ifup LTE_Fibocom_860
+    ```
+
+    The interface goes down and comes back in about 15 seconds — the `xmm` protocol
+    reattaches over AT commands, which is expected.
 - **Editing the scripts on Windows?** Save with **LF (Unix)** line endings. A CRLF in `#!/bin/sh` breaks execution on the router. The repo's `.gitattributes` guards against this.
 
 ### Diagnostics
