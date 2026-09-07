@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Documented
+
+- a second uplink left on the router — typically the temporary Wi-Fi station used
+  to bootstrap the installation — keeps the default route away from LTE, because
+  both interfaces publish one and neither carries a `metric`. Give the secondary
+  link a worse metric so LTE stays primary and the other remains an automatic
+  fallback; `ifup LTE_Fibocom_860` re-installs the route if it is still missing.
+
 ### Changed
 
 - make automatic APN and Russian translations explicit Enter-key defaults in
