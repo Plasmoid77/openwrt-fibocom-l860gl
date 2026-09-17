@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- `files/99-l860-dualstack`: an iface hotplug hook, installed by the installer
+  and removed by the uninstaller, that re-activates the LTE PDN (at most five
+  times in a row) when `pdp` is `IPV4V6`/`IPV6` and the operator granted the
+  data context no IPv6 prefix. MegaFon was measured to grant IPv4v6 to the
+  second PDN in about half of the activations; one retry is normally enough.
+  Verified on OpenWrt 25.12.5 including a router reboot.
+
 ### Documented
+
+- IPv6 / dual-stack on the L860-GL-16: where the operator's IPv6 lands (attach
+  context vs data context), why `profile='0'` and an IPv4v6 attach context do
+  not help, and why MBIM is unavailable in the USB composition
+  (`docs/TROUBLESHOOTING`, section 8 / "IPv6 / dual-stack");
 
 - a second uplink left on the router — typically the temporary Wi-Fi station used
   to bootstrap the installation — keeps the default route away from LTE, because

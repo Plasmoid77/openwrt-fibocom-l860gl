@@ -63,7 +63,9 @@ echo "   packages removed"
 say "Removing leftover configs"
 rm -f /etc/config/3ginfo /etc/config/modemband /etc/config/sms_tool_js
 rm -f /etc/hotplug.d/usb/99-l860-autostart /usr/bin/l860-healthcheck
+rm -f /etc/hotplug.d/iface/99-l860-dualstack
 rm -f /tmp/l860-hotplug.lock /tmp/l860-hotplug.stamp
+rm -f /tmp/l860-dualstack.lock /tmp/l860-dualstack.count
 
 # --- 4. Remove added apk feeds + IceG key ----------------------------------
 say "Removing added apk feeds and key"

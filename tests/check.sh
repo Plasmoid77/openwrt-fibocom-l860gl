@@ -9,6 +9,7 @@ install-fibocom-l860gl.sh
 uninstall-fibocom-l860gl.sh
 l860-healthcheck.sh
 files/99-l860-autostart
+files/99-l860-dualstack
 "
 
 for script in $scripts; do
