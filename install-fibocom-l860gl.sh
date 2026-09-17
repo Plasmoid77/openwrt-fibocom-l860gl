@@ -45,6 +45,7 @@ LAN132_BASE="https://openwrt.132lan.ru/packages"
 CLASH_PROXY_DEFAULT="http://127.0.0.1:7890"   # ssclash/Mihomo mixed-port default
 PROJECT_RAW_BASE="${PROJECT_RAW_BASE:-https://raw.githubusercontent.com/Plasmoid77/openwrt-fibocom-l860gl/main}"
 HOTPLUG_URL="${PROJECT_RAW_BASE}/files/99-l860-autostart"
+DUALSTACK_URL="${PROJECT_RAW_BASE}/files/99-l860-dualstack"
 HEALTHCHECK_URL="${PROJECT_RAW_BASE}/l860-healthcheck.sh"
 
 # --- Network interface settings --------------------------------------------
@@ -53,6 +54,10 @@ IFACE_NAME="LTE_Fibocom_860"    # interface (and UCI section) name
 FW_ZONE="wan"                   # firewall zone to place the interface into
 APN_DEFAULT=""                  # empty = use the operator's subscription APN
 PDP_TYPE="IP"                   # IP (IPv4) | IPV6 | IPV4V6 (dual-stack)
+                                # IPV4V6: the operator may grant the data PDN
+                                # IPv4-only (Megafon: ~1 in 2 activations); the
+                                # 99-l860-dualstack hook re-activates until IPv6
+                                # appears. See docs/TROUBLESHOOTING (IPv6).
 PIN_CODE=""                     # SIM PIN, leave empty if the SIM has none
 
 # --- 4IceG panel settings --------------------------------------------------
@@ -261,6 +266,12 @@ if [ "$CREATE_INTERFACE" = "yes" ]; then
     uci set network."$IFACE_NAME".apn="$APN"
     uci -q delete network."$IFACE_NAME".pdptype || true
     uci set network."$IFACE_NAME".pdp="$PDP_TYPE"
+    case "$PDP_TYPE" in
+        IPV4V6|IPV6)
+            echo "   NOTE: IPv6 on the data PDN is granted by the operator, not the modem;"
+            echo "         the 99-l860-dualstack hook retries the activation when it is missing."
+            ;;
+    esac
     uci set network."$IFACE_NAME".auth='none'
     if [ -n "$PIN_CODE" ]; then
         uci set network."$IFACE_NAME".pincode="$PIN_CODE"
@@ -320,10 +331,16 @@ dl "$HOTPLUG_URL" /tmp/99-l860-autostart
 cp /tmp/99-l860-autostart /etc/hotplug.d/usb/99-l860-autostart
 chmod 0755 /etc/hotplug.d/usb/99-l860-autostart
 
+mkdir -p /etc/hotplug.d/iface
+dl "$DUALSTACK_URL" /tmp/99-l860-dualstack
+cp /tmp/99-l860-dualstack /etc/hotplug.d/iface/99-l860-dualstack
+chmod 0755 /etc/hotplug.d/iface/99-l860-dualstack
+
 dl "$HEALTHCHECK_URL" /tmp/l860-healthcheck
 cp /tmp/l860-healthcheck /usr/bin/l860-healthcheck
 chmod 0755 /usr/bin/l860-healthcheck
 echo "   installed /etc/hotplug.d/usb/99-l860-autostart"
+echo "   installed /etc/hotplug.d/iface/99-l860-dualstack (active only with pdp IPV4V6/IPV6)"
 echo "   installed /usr/bin/l860-healthcheck"
 
 # --- 8. Restart web UI -----------------------------------------------------

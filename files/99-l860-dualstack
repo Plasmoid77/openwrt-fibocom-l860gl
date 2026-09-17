@@ -1,0 +1,75 @@
+#!/bin/sh
+
+# Dual-stack retry for Fibocom L860-GL / Intel XMM7560 on the xmm protocol.
+#
+# With `pdp='IPV4V6'` the xmm handler asks the network for a dual-stack PDN on
+# the data context (CID 1) and then starts a dhcpv6 sub-interface `<iface>_6`.
+# Some operators (Megafon RU, measured 2026-09-18: about 1 in 2 activations)
+# grant that second PDN IPv4-only, and the modem cannot carry data on the
+# attach context, which always does get IPv6.  There is no AT-level way to
+# influence the grant, but re-activating the PDN gets a fresh decision.
+#
+# This hook watches the sub-interface after every ifup of the xmm interface.
+# If no prefix appears within WAIT seconds it re-runs ifup, at most MAX times
+# in a row; a granted prefix resets the counter.  It is a no-op for IPv4-only
+# configurations.
+
+[ "${ACTION:-}" = "ifup" ] || exit 0
+IFACE="${INTERFACE:-}"
+[ -n "$IFACE" ] || exit 0
+[ "$(uci -q get "network.${IFACE}.proto")" = "xmm" ] || exit 0
+
+PDP="$(uci -q get "network.${IFACE}.pdp" | tr '[:lower:]' '[:upper:]')"
+case "$PDP" in
+	IPV4V6|IPV6) ;;
+	*) exit 0 ;;
+esac
+
+MAX=5      # consecutive re-activations before giving up
+WAIT=75    # seconds to wait for the RA prefix (granted IPv6 shows within ~50 s)
+COUNT="/tmp/l860-dualstack.count"
+LOCK="/tmp/l860-dualstack.lock"
+
+prefix_granted() {
+	_p="$(ubus call "network.interface.${IFACE}_6" status 2>/dev/null \
+		| jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null | head -n 1)"
+	case "$_p" in
+		''|'::') return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+# Detach: hotplug runs iface scripts sequentially, and the check takes over a
+# minute.  One watcher at a time; a newer ifup event while one is waiting is
+# the result of this hook's own re-activation.
+(
+	exec 9>"$LOCK"
+	flock -n 9 || exit 0
+
+	waited=0
+	while [ "$waited" -lt "$WAIT" ]; do
+		sleep 5
+		waited=$((waited + 5))
+		if prefix_granted; then
+			n="$(cat "$COUNT" 2>/dev/null || echo 0)"
+			[ "$n" -gt 0 ] 2>/dev/null && \
+				logger -t l860-dualstack "IPv6 prefix granted on ${IFACE}_6 after ${n} re-activation(s)"
+			rm -f "$COUNT"
+			exit 0
+		fi
+		# The interface went away (operator drop, manual ifdown): stop waiting.
+		[ "$(ubus call "network.interface.${IFACE}" status 2>/dev/null | jsonfilter -e '@.up')" = "true" ] || exit 0
+	done
+
+	n="$(cat "$COUNT" 2>/dev/null || echo 0)"
+	case "$n" in ''|*[!0-9]*) n=0 ;; esac
+	n=$((n + 1))
+	if [ "$n" -gt "$MAX" ]; then
+		logger -t l860-dualstack "no IPv6 prefix on ${IFACE}_6 after ${MAX} re-activations; keeping the IPv4-only PDN"
+		rm -f "$COUNT"
+		exit 0
+	fi
+	printf '%s\n' "$n" > "$COUNT"
+	logger -t l860-dualstack "no IPv6 prefix on ${IFACE}_6 (attempt ${n}/${MAX}); re-activating the PDN"
+	/sbin/ifup "$IFACE"
+) </dev/null >/dev/null 2>&1 &

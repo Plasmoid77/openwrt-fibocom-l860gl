@@ -30,7 +30,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 5. **Auto-detects the AT port** with `AT+CGMM` and checks SIM state with `AT+CPIN?`.
 6. Creates the **`LTE_Fibocom_860`** interface using the XMM handler's actual `pdp` UCI option and adds it to the `wan` firewall zone.
 7. Points the panels at the detected port: 3ginfo (`device` + `network`), modemband (`set_port` + `iface`), sms-tool (5 ports), and sets the SMS prefix to `7`.
-8. Installs reliable USB re-attach handling and the `l860-healthcheck` command.
+8. Installs reliable USB re-attach handling, the `99-l860-dualstack` iface hook (re-activates the PDN until the operator grants IPv6 with `pdp=IPV4V6`) and the `l860-healthcheck` command.
 9. Reboots the router (10-second countdown, cancel with `Ctrl+C`).
 
 ### Requirements
@@ -87,6 +87,7 @@ The uninstaller removes the interface and its firewall membership, deletes the p
 - **`Failed add repository modem_kmod!`** from the 132lan `add.sh` was harmless in the tested setup: the main `modemfeed` was added and matching `kmod-*` packages were available from the official OpenWrt feed. Verify that the following `xmm-modem` and `luci-proto-xmm` installation succeeds.
 - **`Carrier: Absent` after install** — do not assume APN first. Run `l860-healthcheck` and verify USB, `CPIN: READY`, LTE registration, PDP context, `wwan0 LOWER_UP`, and ping in that order. `SIM NOT INSERTED` is a physical SIM/contact fault.
 - **Ordinary SIMs from different carriers** — leave APN empty. Beeline, MegaFon and T2 supplied their correct Default APN during field tests.
+- **`pdp=IPV4V6` but IPv6 comes and goes** — the operator (verified on MegaFon) grants IPv4v6 to the second PDN about half of the time; the `99-l860-dualstack` hook re-activates the PDN until a prefix appears (`logread -e l860-dualstack`). MBIM is unavailable on this module in USB mode. Details: `docs/TROUBLESHOOTING.en.md`, "IPv6 / dual-stack".
 - **No reconnect after modem USB power-cycle** — this fork installs `99-l860-autostart` to serialise composite-device events and avoid overlapping XMM teardown/setup.
 - **3ginfo shows no data** — verify the AT port (`ls -l /dev/ttyACM*`, then `sms_tool -d /dev/ttyACM0 at ATI`). If the working port differs, update `device` in 3ginfo.
 - **Band locking** via modemband or `AT+XACT` — careful: locking a band that isn't present where you are will prevent registration. Undo with `AT+XACT=2,,,0` (allow all LTE bands). LTE band numbers in `AT+XACT` are offset by +100 (B3 → 103, B7 → 107, B20 → 120).
