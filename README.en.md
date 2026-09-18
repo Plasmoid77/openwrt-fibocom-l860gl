@@ -23,7 +23,7 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 
 ### What the script does
 
-1. Prompts for the **APN** and whether to install **Russian** panel translations. Pressing Enter at both prompts accepts the defaults: the operator-provided APN and Russian translations.
+1. Prompts for the **APN**, whether to **request IPv6 (dual-stack)** from the operator, and whether to install **Russian** panel translations. Pressing Enter at every prompt accepts the defaults: the operator-provided APN, IPv4 only, Russian translations. Choose IPv6 only for a SIM that has it — otherwise the `99-l860-dualstack` hook would reconnect the PDN for nothing.
 2. Adds the [132lan](https://openwrt.132lan.ru) modem feed and installs the XMM stack: `luci-proto-xmm`, `xmm-modem`, `kmod-usb-acm`, `kmod-usb-net-cdc-ncm`, `kmod-usb-serial-option`, etc., plus `sms-tool`.
 3. Adds the [4IceG/Modem-extras-apk](https://github.com/4IceG/Modem-extras-apk) apk repo and key (idempotent, alongside the 132lan feed).
 4. Installs `luci-app-3ginfo-lite`, `luci-app-sms-tool-js`, `luci-app-modemband` (+ RU locales if chosen).
@@ -32,6 +32,15 @@ The L860-GL is an M.2 modem based on Intel's XMM7560. Unlike Qualcomm modems (qm
 7. Points the panels at the detected port: 3ginfo (`device` + `network`), modemband (`set_port` + `iface`), sms-tool (5 ports), and sets the SMS prefix to `7`.
 8. Installs reliable USB re-attach handling, the `99-l860-dualstack` iface hook (re-activates the PDN until the operator grants IPv6 with `pdp=IPV4V6`) and the `l860-healthcheck` command.
 9. Reboots the router (10-second countdown, cancel with `Ctrl+C`).
+
+**Switching IPv4-only ↔ dual-stack on an installed router** works at any time — the mode is read on every interface start and the hook follows it:
+
+```sh
+uci set network.LTE_Fibocom_860.pdp='IPV4V6'   # or 'IP'
+uci commit network && ifup LTE_Fibocom_860
+```
+
+or in LuCI: Network → Interfaces → LTE_Fibocom_860 → Edit → **PDP Type** → Save & Apply.
 
 ### Requirements
 

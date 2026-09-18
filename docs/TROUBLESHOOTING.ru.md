@@ -246,6 +246,14 @@ IPv6 начинает ходить ещё через ~45–60 с — это то
 logread -e l860-dualstack
 ```
 
+**Переключение режима.** `uci set network.LTE_Fibocom_860.pdp='IPV4V6'`
+(или `'IP'`), `uci commit network`, `ifup LTE_Fibocom_860` — либо LuCI →
+Network → Interfaces → LTE_Fibocom_860 → Edit → PDP Type. Хук читает `pdp`
+при каждом `ifup`; при `IP` он ничего не делает. На SIM без IPv6 держите
+`IP`: запрос IPv4v6 сам по себе безвреден (сеть выдаст IPv4), но хук не
+отличит «оператор без IPv6» от «не повезло» и будет переподключать PDN
+до 5 раз при каждом подъёме.
+
 **Чего не будет.** MBIM у L860-GL существует только в PCIe-режиме (драйвер
 `iosm`, ThinkPad); в USB-композиции 8087:095a MBIM-интерфейса нет, а
 `AT+GTUSBMODE`, `AT+XUSBCFG`, `AT+XUSBCOMP` в этой прошивке не реализованы.

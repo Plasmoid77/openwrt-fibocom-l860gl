@@ -40,6 +40,13 @@ OpenWrt 25.12.5, MegaFon SIM (`apn='internet'`).
   `ifup` and re-runs `ifup` when it is missing, at most 5 times in a row; one
   re-activation is usually enough (~2 min to full dual-stack, also after a
   reboot). Check with `logread -e l860-dualstack`.
+- Switch modes any time: `uci set network.LTE_Fibocom_860.pdp='IPV4V6'` (or
+  `'IP'`), `uci commit network`, `ifup LTE_Fibocom_860` — or LuCI → Network →
+  Interfaces → LTE_Fibocom_860 → Edit → PDP Type. The hook reads `pdp` on
+  every `ifup` and does nothing for `IP`. Keep `IP` on a SIM without IPv6:
+  requesting IPv4v6 is harmless by itself (the network grants IPv4), but the
+  hook cannot tell "operator has no IPv6" from "unlucky grant" and would
+  reconnect the PDN up to 5 times on every start.
 - MBIM is not an option: the L860-GL exposes MBIM only in PCIe mode (`iosm`);
   the USB composition 8087:095a has no MBIM interface and `AT+GTUSBMODE`,
   `AT+XUSBCFG`, `AT+XUSBCOMP` are not implemented in this firmware.
