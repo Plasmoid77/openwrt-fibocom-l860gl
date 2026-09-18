@@ -11,8 +11,16 @@
   second PDN in about half of the activations; one retry is normally enough.
   Verified on OpenWrt 25.12.5 including a router reboot.
 
+### Changed
+
+- the installer asks whether to request IPv6 (dual-stack) from the operator,
+  Enter = IPv4 only; `PDP_TYPE_DEFAULT` in the header sets that default. The
+  retry hook is only useful on a SIM that has IPv6, so the choice is explicit.
+
 ### Documented
 
+- switching IPv4-only ↔ dual-stack on an installed router (`pdp` via uci or
+  the LuCI PDP Type field; the hook follows the setting on the next `ifup`);
 - IPv6 / dual-stack on the L860-GL-16: where the operator's IPv6 lands (attach
   context vs data context), why `profile='0'` and an IPv4v6 attach context do
   not help, and why MBIM is unavailable in the USB composition

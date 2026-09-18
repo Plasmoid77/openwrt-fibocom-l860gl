@@ -53,11 +53,14 @@ CREATE_INTERFACE="yes"          # yes | no  -- create the XMM interface
 IFACE_NAME="LTE_Fibocom_860"    # interface (and UCI section) name
 FW_ZONE="wan"                   # firewall zone to place the interface into
 APN_DEFAULT=""                  # empty = use the operator's subscription APN
-PDP_TYPE="IP"                   # IP (IPv4) | IPV6 | IPV4V6 (dual-stack)
-                                # IPV4V6: the operator may grant the data PDN
-                                # IPv4-only (Megafon: ~1 in 2 activations); the
-                                # 99-l860-dualstack hook re-activates until IPv6
-                                # appears. See docs/TROUBLESHOOTING (IPv6).
+PDP_TYPE_DEFAULT="IP"           # Enter-key default at the IPv6 prompt:
+                                # IP (IPv4 only) | IPV4V6 (dual-stack).
+                                # Choose IPV4V6 only for operators that hand
+                                # out IPv6: the 99-l860-dualstack hook then
+                                # re-activates the PDN until IPv6 is granted
+                                # (Megafon: ~1 in 2 activations), which on an
+                                # IPv4-only SIM would only cause reconnects.
+                                # See docs/TROUBLESHOOTING (IPv6).
 PIN_CODE=""                     # SIM PIN, leave empty if the SIM has none
 
 # --- 4IceG panel settings --------------------------------------------------
@@ -144,6 +147,31 @@ if [ "$CREATE_INTERFACE" = "yes" ]; then
         echo "   using explicit APN: $APN"
     else
         echo "   using automatic APN supplied by the operator"
+    fi
+fi
+
+# --- Ask whether the operator should be asked for IPv6 --------------------
+# Dual-stack is requested per PDN activation and granted by the operator; the
+# 99-l860-dualstack hook retries when the grant is IPv4-only. On a SIM without
+# IPv6 that retry only reconnects, so keep IP unless the operator has IPv6.
+PDP_TYPE="$PDP_TYPE_DEFAULT"
+if [ "$CREATE_INTERFACE" = "yes" ]; then
+    if [ "$PDP_TYPE_DEFAULT" = "IPV4V6" ]; then
+        PDP_HINT="Yes/no, default: Yes"
+    else
+        PDP_HINT="yes/No, default: No"
+    fi
+    printf 'Request IPv6 (dual-stack) from the operator? Only if your SIM has IPv6 [%s]: ' "$PDP_HINT"
+    read -r pdp_input || pdp_input=""
+    case "$pdp_input" in
+        [Yy]*) PDP_TYPE="IPV4V6" ;;
+        [Nn]*) PDP_TYPE="IP" ;;
+        *)     PDP_TYPE="$PDP_TYPE_DEFAULT" ;;
+    esac
+    if [ "$PDP_TYPE" = "IPV4V6" ]; then
+        echo "   PDP type: IPV4V6 (dual-stack; the 99-l860-dualstack hook retries until IPv6 is granted)"
+    else
+        echo "   PDP type: IP (IPv4 only)"
     fi
 fi
 
@@ -266,12 +294,6 @@ if [ "$CREATE_INTERFACE" = "yes" ]; then
     uci set network."$IFACE_NAME".apn="$APN"
     uci -q delete network."$IFACE_NAME".pdptype || true
     uci set network."$IFACE_NAME".pdp="$PDP_TYPE"
-    case "$PDP_TYPE" in
-        IPV4V6|IPV6)
-            echo "   NOTE: IPv6 on the data PDN is granted by the operator, not the modem;"
-            echo "         the 99-l860-dualstack hook retries the activation when it is missing."
-            ;;
-    esac
     uci set network."$IFACE_NAME".auth='none'
     if [ -n "$PIN_CODE" ]; then
         uci set network."$IFACE_NAME".pincode="$PIN_CODE"
